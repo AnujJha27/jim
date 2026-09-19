@@ -779,8 +779,10 @@ void TextEditor::readSettings() {
   editorPrefs.invisibleCharsEnabled = settings.value("invisibleChars", false).toBool();
   editorPrefs.gitBlameEnabled = settings.value("gitBlame", false).toBool();
   editorPrefs.autoSaveFocusEnabled = settings.value("autoSaveFocus", false).toBool();
-  editorPrefs.currentThemeIndex = qBound(0, settings.value("theme", 0).toInt(),
-                                         qMax(0, editorPrefs.themes.size() - 1));
+  const bool hasThemePreference = settings.value("themePreferenceVersion", 0).toInt() >= 1;
+  editorPrefs.currentThemeIndex = qBound(
+      0, hasThemePreference ? settings.value("theme", 1).toInt() : 1,
+      qMax(0, editorPrefs.themes.size() - 1));
   const bool restoreSplitView = settings.value("splitView", false).toBool();
   editorPrefs.splitViewEnabled = false;
   if (settings.contains("geometry")) restoreGeometry(settings.value("geometry").toByteArray());
@@ -815,6 +817,7 @@ void TextEditor::writeSettings() {
   settings.setValue("gitBlame", editorPrefs.gitBlameEnabled);
   settings.setValue("autoSaveFocus", editorPrefs.autoSaveFocusEnabled);
   settings.setValue("theme", editorPrefs.currentThemeIndex);
+  settings.setValue("themePreferenceVersion", 1);
   settings.setValue("splitView", editorPrefs.splitViewEnabled);
   settings.setValue("markdownPreview", markdownPreviewAct && markdownPreviewAct->isChecked());
   settings.setValue("geometry", saveGeometry());
