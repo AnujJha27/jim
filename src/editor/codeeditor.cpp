@@ -83,6 +83,11 @@ CodeEditor::CodeEditor(QWidget *parent)
   // Ghost replay & graveyard tracking
   connect(document(), &QTextDocument::contentsChange, this,
           &CodeEditor::onDocumentContentsChange);
+  paintCacheTimer = new QTimer(this);
+  paintCacheTimer->setSingleShot(true);
+  paintCacheTimer->setInterval(100);
+  connect(paintCacheTimer, &QTimer::timeout, this, &CodeEditor::rebuildPaintCache);
+  rebuildPaintCache();
   startRecordingGhost();
 
   // Vim mode
@@ -221,26 +226,28 @@ void CodeEditor::paintEvent(QPaintEvent *e) {
   QPainter painter(viewport());
   painter.setRenderHint(QPainter::Antialiasing);
 
+  if (!ghostText.isEmpty() && textCursor().selectionStart() == textCursor().position()) {
+    const QString firstLine = ghostText.section('\n', 0, 0);
+    const QRect cursor = cursorRect(textCursor());
+    painter.setPen(QColor(140, 140, 140, 170));
+    painter.drawText(cursor.right() + 1, cursor.top(),
+                    fontMetrics().horizontalAdvance(firstLine) + 4,
+                    cursor.height(), Qt::AlignLeft | Qt::AlignVCenter, firstLine);
+  }
+
   QTextBlock block = firstVisibleBlock();
   QPointF offset = contentOffset();
-  QRegularExpression hexRegex("#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})\\b");
-
   while (block.isValid()) {
     QRectF blockRect = blockBoundingGeometry(block).translated(offset);
     if (blockRect.top() > e->rect().bottom()) break;
 
     if (block.isVisible() && blockRect.bottom() >= e->rect().top()) {
-      QString text = block.text();
-      QRegularExpressionMatchIterator i = hexRegex.globalMatch(text);
-      while (i.hasNext()) {
-        QRegularExpressionMatch match = i.next();
-        int startPos = match.capturedStart();
-        QColor color(match.captured(0));
-
+      for (const ColorMark &mark : colorMarks.value(block.blockNumber())) {
+        QColor color = mark.color;
         if (color.isValid()) {
           int swatchSize = 10;
           QTextCursor endCursor(block);
-          endCursor.setPosition(block.position() + startPos + match.capturedLength());
+          endCursor.setPosition(block.position() + mark.offset + mark.length);
           QRect endRect = cursorRect(endCursor);
           QRect square(endRect.right() + 4, endRect.top() + (endRect.height() - swatchSize)/2, swatchSize, swatchSize);
 
@@ -1149,6 +1156,19 @@ void CodeEditor::keyPressEvent(QKeyEvent *event) {
   // Always emit keyPressed for heatmap tracking (before any returns)
   emit keyPressed(event->key(), event->text());
 
+  if (!ghostText.isEmpty()) {
+      if (event->key() == Qt::Key_Escape) {
+          clearGhostText();
+          return;
+      }
+      if (event->key() == Qt::Key_Tab && event->modifiers() == Qt::NoModifier) {
+          insertPlainText(ghostText);
+          clearGhostText();
+          return;
+      }
+      clearGhostText();
+  }
+
   // Vim mode — intercepts keys when enabled
   if (vimMode && vimMode->handleKey(event, this))
       return;
@@ -1296,6 +1316,17 @@ void CodeEditor::keyPressEvent(QKeyEvent *event) {
   QPlainTextEdit::keyPressEvent(event);
 }
 
+void CodeEditor::setGhostText(const QString &text) {
+  ghostText = text;
+  viewport()->update();
+}
+
+void CodeEditor::clearGhostText() {
+  if (ghostText.isEmpty()) return;
+  ghostText.clear();
+  viewport()->update();
+}
+
 void CodeEditor::autoIndent() {
   QTextCursor cursor = textCursor();
   QString previousLine = cursor.block().text();
@@ -1391,6 +1422,10 @@ void CodeEditor::logGhostEvent(int pos, int charsRemoved, const QString &textAdd
 }
 
 void CodeEditor::onDocumentContentsChange(int position, int charsRemoved, int charsAdded) {
+    Q_UNUSED(position);
+    Q_UNUSED(charsRemoved);
+    Q_UNUSED(charsAdded);
+    if (paintCacheTimer) paintCacheTimer->start();
     if (!ghostIsRecording) return;
 
     if (sessionStartTimeMs == 0) {
@@ -1406,6 +1441,22 @@ void CodeEditor::onDocumentContentsChange(int position, int charsRemoved, int ch
     }
 
     logGhostEvent(position, charsRemoved, addedStr);
+}
+
+void CodeEditor::rebuildPaintCache() {
+    colorMarks.clear();
+    static const QRegularExpression hexRegex(
+        "#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})\\b");
+    for (QTextBlock block = document()->begin(); block.isValid(); block = block.next()) {
+        const QString text = block.text();
+        for (auto it = hexRegex.globalMatch(text); it.hasNext();) {
+            const QRegularExpressionMatch match = it.next();
+            const QColor color(match.captured(0));
+            if (color.isValid())
+                colorMarks[block.blockNumber()].append({match.capturedStart(),
+                                                         match.capturedLength(), color});
+        }
+    }
 }
 
 void CodeEditor::miniMapPaintEvent(QPaintEvent *event) {

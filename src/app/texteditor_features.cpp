@@ -222,6 +222,12 @@ void TextEditor::applyModernStyle() {
             width: 6px;
             margin: 0px;
         }
+        QTabWidget[activePane="true"] {
+            border: 2px solid #007acc;
+        }
+        QTabWidget[activePane="false"] {
+            border: 1px solid #3e3e42;
+        }
         QInputDialog {
             background-color: #2d2d30;
         }
@@ -229,6 +235,16 @@ void TextEditor::applyModernStyle() {
             background-color: #2d2d30;
         }
     )";
+  if (!editorPrefs.themes.isEmpty()) {
+    const ColorTheme &theme = editorPrefs.themes[editorPrefs.currentThemeIndex];
+    style.replace("#1e1e1e", theme.background.name());
+    style.replace("#252526", theme.lineNumberBg.name());
+    style.replace("#2d2d30", theme.background.darker(theme.background.lightness() > 128 ? 105 : 125).name());
+    style.replace("#cccccc", theme.foreground.name());
+    style.replace("#969696", theme.lineNumberFg.name());
+    style.replace("#ffffff", theme.foreground.name());
+    style.replace("#007acc", theme.selection.name());
+  }
   setStyleSheet(style);
 }
 
@@ -253,10 +269,13 @@ void TextEditor::changeEvent(QEvent *e) {
 }
 
 bool TextEditor::eventFilter(QObject *obj, QEvent *event) {
+    if (obj == tabWidget2 && event->type() == QEvent::Resize)
+        updateSplitEmptyState();
     if (event->type() == QEvent::FocusIn) {
         for (QWidget *widget = qobject_cast<QWidget *>(obj); widget; widget = widget->parentWidget()) {
             if (widget == tabWidget || widget == tabWidget2) {
                 activeTabWidget = qobject_cast<QTabWidget *>(widget);
+                applyPaneDimming();
                 break;
             }
         }
@@ -336,10 +355,32 @@ void TextEditor::openSearchEverywhere() {
         searchEverywhere = new SearchEverywhere(this);
         connect(searchEverywhere, &SearchEverywhere::fileRequested,
                 this, &TextEditor::loadFile);
+        connect(searchEverywhere, &SearchEverywhere::symbolRequested,
+                this, [this](const QString &path, int line) {
+                    QTabWidget *pane = nullptr;
+                    if (auto *widget = findOpenDocument(normalizedPath(path), &pane)) {
+                        activeTabWidget = pane;
+                        pane->setCurrentWidget(widget);
+                        if (auto *editor = qobject_cast<CodeEditor *>(widget)) {
+                            QTextCursor cursor(editor->document()->findBlockByLineNumber(line));
+                            editor->setTextCursor(cursor);
+                            editor->centerCursor();
+                            editor->setFocus();
+                        }
+                    }
+                });
     }
-    // Gather all actions
     QList<QAction*> allActs;
-    allActs << menuBar()->actions();
+    std::function<void(QMenu*)> collect = [&](QMenu *menu) {
+        for (QAction *act : menu->actions()) {
+            if (act->isSeparator()) continue;
+            if (act->menu()) { collect(act->menu()); continue; }
+            if (!act->text().isEmpty()) allActs.append(act);
+        }
+    };
+    for (QAction *act : customMenuBar->actions())
+        if (act->menu()) collect(act->menu());
+
     // Gather open files
     QStringList openFiles;
     const QList<QTabWidget *> panes = tabWidget2 ? QList<QTabWidget *>{tabWidget, tabWidget2}
@@ -351,7 +392,24 @@ void TextEditor::openSearchEverywhere() {
                 openFiles << ed->getFileName();
         }
     }
-    searchEverywhere->populate(allActs, recentFiles, openFiles);
+    QList<SearchEverywhere::Symbol> symbols;
+    static const QRegularExpression symbolRe(
+        R"(^\s*(?:class|struct|enum|namespace|function|def|fn|contract|interface|library)\s+([A-Za-z_]\w*)|^\s*(?:[A-Za-z_][\w:<>*& ]*)\s+([A-Za-z_]\w*)\s*\()",
+        QRegularExpression::MultilineOption);
+    for (QTabWidget *tw : panes) {
+        for (int i = 0; i < tw->count(); ++i) {
+            auto *ed = qobject_cast<CodeEditor *>(tw->widget(i));
+            if (!ed || ed->getFileName().isEmpty()) continue;
+            const QStringList lines = ed->toPlainText().split('\n');
+            for (int line = 0; line < lines.size(); ++line) {
+                const auto match = symbolRe.match(lines[line]);
+                if (match.hasMatch())
+                    symbols.append({match.captured(1).isEmpty() ? match.captured(2) : match.captured(1),
+                                    ed->getFileName(), line});
+            }
+        }
+    }
+    searchEverywhere->populate(allActs, recentFiles, openFiles, symbols);
     searchEverywhere->exec();
 }
 
@@ -407,16 +465,32 @@ void TextEditor::sendSelectionToScratchpad() {
 }
 
 void TextEditor::applyPaneDimming() {
-    // Dim the non-active pane in split view
-    if (!editorPrefs.splitViewEnabled || !tabWidget2) return;
-    QTabWidget *activePane = currentTabWidget();
-    bool pane1Active = activePane == tabWidget;
-    // Apply semi-transparent overlay on the inactive pane container
-    // We use GraphicsOpacityEffect on the entire inactive QTabWidget
-    QTabWidget *active = pane1Active ? tabWidget : tabWidget2;
-    QTabWidget *inactive = pane1Active ? tabWidget2 : tabWidget;
-    Q_UNUSED(active);
-    inactive->setWindowOpacity(0.65);
+    if (!tabWidget2) return;
+    tabWidget->setWindowOpacity(currentTabWidget() == tabWidget ? 1.0 : 0.96);
+    tabWidget2->setWindowOpacity(currentTabWidget() == tabWidget2 ? 1.0 : 0.96);
+}
+
+void TextEditor::updateSplitEmptyState() {
+    if (!splitEmptyLabel || !tabWidget2) return;
+    splitEmptyLabel->setGeometry(tabWidget2->rect());
+    splitEmptyLabel->setVisible(editorPrefs.splitViewEnabled && tabWidget2->count() == 0);
+}
+
+void TextEditor::updateContextualActions() {
+    CodeEditor *editor = currentEditor();
+    const Language language = editor ? editor->getLanguage() : Language::PlainText;
+    const bool solidity = language == Language::Solidity || language == Language::Yul;
+    const bool story = language == Language::Story;
+    for (QAction *action : {godViewAct, extractABIAct, resolveFourByteAct,
+                            storageSlotVizAct, gasMiniMapAct, slitherOverlayAct,
+                            onChainTracerAct, proxyDiffAct, memTraceAct})
+        if (action) action->setEnabled(solidity);
+    for (QAction *action : {storyGraphAct, storyPlaytestAct, storyExportAct})
+        if (action) action->setEnabled(story);
+    const bool file = editor && !editor->getFileName().isEmpty();
+    if (disassembleAct) disassembleAct->setEnabled(file);
+    if (binaryInspectAct) binaryInspectAct->setEnabled(file);
+    if (openHexAct) openHexAct->setEnabled(file);
 }
 
 void TextEditor::propagateV080Settings(CodeEditor *ed) {

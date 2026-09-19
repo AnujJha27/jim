@@ -81,6 +81,9 @@ void TextEditor::createActions() {
   connect(findNextAct, &QAction::triggered, this, &TextEditor::findNext);
 
   connect(findBar, &FindBar::textChanged, this, &TextEditor::onFindTextChanged);
+  connect(findBar, &FindBar::optionsChanged, this, [this]() {
+    onFindTextChanged(findBar->getSearchText());
+  });
   connect(findBar, &FindBar::findNextRequested, this, &TextEditor::findNext);
   connect(findBar, &FindBar::findPreviousRequested, this, &TextEditor::findPrevious);
   connect(findBar, &FindBar::closeRequested, this, &TextEditor::closeFindBar);
@@ -207,7 +210,7 @@ void TextEditor::createActions() {
   connect(themeAct, &QAction::triggered, this, &TextEditor::changeTheme);
 
   zenModeAct = new QAction("\U0001F9D8 Zen Mode", this);
-  zenModeAct->setShortcut(QKeySequence("Ctrl+Shift+Z"));
+  zenModeAct->setShortcut(QKeySequence("Ctrl+Alt+Z"));
   zenModeAct->setCheckable(true);
   connect(zenModeAct, &QAction::triggered, this, &TextEditor::toggleZenMode);
 
@@ -233,7 +236,7 @@ void TextEditor::createActions() {
 
   // ── Tools actions ────────────────────────────────────────────────────────
   disassembleAct = new QAction("&Disassemble File...", this);
-  disassembleAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_D));
+  disassembleAct->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_D));
   disassembleAct->setStatusTip("Disassemble a binary using objdump");
   disassembleAct->setIcon(QIcon::fromTheme("applications-engineering",
                           QIcon::fromTheme("utilities-terminal")));
@@ -392,7 +395,7 @@ void TextEditor::createActions() {
 
   // ── v0.9.0 Web3Sec Actions ──────────────────────────────────────────────
   godViewAct = new QAction("\U0001F441 God View Contract", this);
-  godViewAct->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_G));
+  godViewAct->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::SHIFT | Qt::Key_G));
   godViewAct->setStatusTip("Collapse all function bodies to spec-mode (signatures + NatSpec only)");
   connect(godViewAct, &QAction::triggered, this, &TextEditor::triggerGodView);
 
@@ -408,7 +411,7 @@ void TextEditor::createActions() {
 
   panicButtonAct = new QAction("\U0001F480 PANIC BUTTON", this);
   panicButtonAct->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::SHIFT | Qt::Key_Delete));
-  panicButtonAct->setStatusTip("Anti-forensic killswitch: close editor, shred scratchpad, wipe history");
+  panicButtonAct->setStatusTip("Best-effort local cleanup: close editor, clear scratchpad, wipe history");
   connect(panicButtonAct, &QAction::triggered, this, &TextEditor::triggerPanicButton);
 
   storageSlotVizAct = new QAction("\U0001F5C4 Storage Slot Visualizer", this);
@@ -575,7 +578,7 @@ void TextEditor::createMenus() {
   narrativeMenu->addAction(storyGraphAct);
 
   storyPlaytestAct = new QAction("▶ Playtest Story", this);
-  storyPlaytestAct->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_P));
+  storyPlaytestAct->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_Y));
   storyPlaytestAct->setCheckable(true);
   connect(storyPlaytestAct, &QAction::triggered, this, &TextEditor::toggleStoryPlaytest);
   narrativeMenu->addAction(storyPlaytestAct);
@@ -587,7 +590,27 @@ void TextEditor::createMenus() {
   connect(storyExportAct, &QAction::triggered, this, &TextEditor::exportStory);
   narrativeMenu->addAction(storyExportAct);
 
+  validateShortcuts();
   updateRecentFilesMenu();
+}
+
+void TextEditor::validateShortcuts() {
+  shortcutRegistry.clear();
+  for (QAction *action : findChildren<QAction *>()) {
+    QList<QKeySequence> valid;
+    for (const QKeySequence &shortcut : action->shortcuts()) {
+      const QString key = shortcut.toString(QKeySequence::PortableText);
+      if (key.isEmpty() || shortcutRegistry.contains(key)) {
+        if (!key.isEmpty())
+          qWarning() << "Shortcut collision:" << key << "for" << action->text()
+                     << "already used by" << shortcutRegistry.value(key)->text();
+        continue;
+      }
+      shortcutRegistry.insert(key, action);
+      valid.append(shortcut);
+    }
+    action->setShortcuts(valid);
+  }
 }
 
 void TextEditor::showAISettings() {
@@ -611,12 +634,17 @@ void TextEditor::showAISettings() {
 
 void TextEditor::toggleAIAutocomplete(bool enabled) {
     aiAutocomplete->setEnabled(enabled);
+    if (!enabled)
+        for (CodeEditor *editor : allEditors()) editor->clearGhostText();
 }
 
-void TextEditor::onAISuggestion(const QString &suggestion) {
-    if (suggestion.isEmpty()) return;
-    statusBar()->showMessage("AI Suggestion: " + suggestion, 5000);
-    qDebug() << "AI Suggestion:" << suggestion;
+void TextEditor::onAISuggestion(QPlainTextEdit *editor, int position, int revision,
+                                const QString &suggestion) {
+    auto *codeEditor = qobject_cast<CodeEditor *>(editor);
+    if (!codeEditor || suggestion.isEmpty() || codeEditor != currentEditor()) return;
+    if (codeEditor->textCursor().position() != position ||
+        codeEditor->document()->revision() != revision) return;
+    codeEditor->setGhostText(suggestion);
 }
 
 void TextEditor::clampToScreen() {

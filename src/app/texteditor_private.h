@@ -3,7 +3,6 @@
 
 #include "texteditor.h"
 #include "breadcrumb_bar.h"
-#include "command_palette.h"
 #include "draggable_tabs.h"
 #include "find_bar.h"
 #include "search_everywhere.h"

@@ -1,6 +1,7 @@
 #include "find_bar.h"
 
 #include <QHBoxLayout>
+#include <QCheckBox>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
@@ -16,6 +17,20 @@ FindBar::FindBar(QWidget *parent) : QWidget(parent) {
                              "#cccccc; border: 1px solid #555555; padding: 2px "
                              "5px; border-radius: 2px; }");
     layout->addWidget(findInput);
+
+    regexBox = new QCheckBox(".*", this);
+    caseBox = new QCheckBox("Aa", this);
+    wordBox = new QCheckBox("Word", this);
+    selectionBox = new QCheckBox("Sel", this);
+    regexBox->setToolTip("Regular expression");
+    caseBox->setToolTip("Case sensitive");
+    wordBox->setToolTip("Whole word");
+    selectionBox->setToolTip("Search in selection");
+    for (QCheckBox *box : {regexBox, caseBox, wordBox, selectionBox}) {
+        box->setStyleSheet("QCheckBox { color:#aaa; font-size:10px; }");
+        layout->addWidget(box);
+        connect(box, &QCheckBox::toggled, this, &FindBar::optionsChanged);
+    }
 
     matchLabel = new QLabel("0/0", this);
     matchLabel->setStyleSheet("color: #999999; font-size: 11px;");
@@ -75,3 +90,8 @@ void FindBar::setMatchCount(int current, int total) {
 QString FindBar::getSearchText() const {
     return findInput->text();
 }
+
+bool FindBar::isRegex() const { return regexBox->isChecked(); }
+bool FindBar::isCaseSensitive() const { return caseBox->isChecked(); }
+bool FindBar::isWholeWord() const { return wordBox->isChecked(); }
+bool FindBar::isSelectionOnly() const { return selectionBox->isChecked(); }

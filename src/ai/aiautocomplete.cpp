@@ -40,6 +40,10 @@ void AIAutocomplete::trigger(QPlainTextEdit *editor)
     if (!m_enabled || m_baseUrl.isEmpty()) return;
     
     m_currentEditor = editor;
+    if (m_reply) {
+        m_reply->abort();
+        m_reply = nullptr;
+    }
     m_debounceTimer->start();
 }
 
@@ -50,6 +54,8 @@ void AIAutocomplete::fetchAutocomplete()
     QTextCursor cursor = m_currentEditor->textCursor();
     QString fullText = m_currentEditor->toPlainText();
     int pos = cursor.position();
+    m_requestPosition = pos;
+    m_requestRevision = m_currentEditor->document()->revision();
 
     // Context windows
     QString prefix = fullText.left(pos).right(2000);
@@ -82,6 +88,7 @@ void AIAutocomplete::fetchAutocomplete()
     json["stream"] = false;
 
     QNetworkReply *reply = m_networkManager->post(request, QJsonDocument(json).toJson());
+    m_reply = reply;
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         onReplyFinished(reply);
     });
@@ -89,6 +96,11 @@ void AIAutocomplete::fetchAutocomplete()
 
 void AIAutocomplete::onReplyFinished(QNetworkReply *reply)
 {
+    if (m_reply != reply) {
+        reply->deleteLater();
+        return;
+    }
+    m_reply = nullptr;
     if (reply->error() == QNetworkReply::NoError) {
         QByteArray data = reply->readAll();
         QJsonDocument doc = QJsonDocument::fromJson(data);
@@ -97,7 +109,8 @@ void AIAutocomplete::onReplyFinished(QNetworkReply *reply)
         QJsonArray choices = root["choices"].toArray();
         if (!choices.isEmpty()) {
             QString content = choices[0].toObject()["message"].toObject()["content"].toString();
-            emit suggestionReady(content.trimmed());
+            emit suggestionReady(m_currentEditor, m_requestPosition, m_requestRevision,
+                                 content.trimmed());
         }
     } else {
         emit errorOccurred(reply->errorString());

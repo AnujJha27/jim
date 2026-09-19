@@ -59,11 +59,11 @@ A lightweight, native code editor built with C++ and Qt6. Fast, zero-trace, and 
 
 ### Navigation
 - **File Tree** — Browse and open files from a sidebar (`Ctrl+B`)
-- **Search Everywhere** — tap `Shift` twice quickly to instantly summon a unified search bar for files, symbols, command palette actions, and recent history (`v0.8.0`)
+- **Search Everywhere** — tap `Shift` twice quickly to summon one quick-open search for files, symbols, actions, and recent history (`v0.8.0`)
 - **Breadcrumb Navigation** — Shows `folder > file > function` context below the tab bar
 - **Go to Line** — Jump to any line instantly (`Ctrl+G`)
-- **Find & Replace** — Inline find bar with "Find All Matches" (simultaneous highlighting), match count, and golden-accent current selection
-- **Command Palette** — Fuzzy-search every editor action by name; arrow keys to navigate, Enter to trigger (`Ctrl+Shift+P`, `v1.8.1`)
+- **Find & Replace** — Inline bar with regex, case, whole-word, selection-only, match count, and replacement support
+- **Command Palette** — The same quick-open UI filtered to actions (`Ctrl+Shift+P`, `v1.8.1`)
 - **Recent Files** — Access recently opened files from the File menu
 - **Mini Map Navigation** — Click anywhere to jump to that part of your code
 - **Quick-Switch Header/Source** — `Alt+O` to instantly toggle between `file.cpp` and `file.h` (`v0.8.0`)
@@ -72,13 +72,13 @@ A lightweight, native code editor built with C++ and Qt6. Fast, zero-trace, and 
 ### Developer Tools
 - **Integrated Terminal** — Embedded shell panel with animated slide-in/out (`Ctrl+\``)
 - **Hex Editor** — Built-in binary file viewer/editor: hex + ASCII display, keyboard navigation, full save support, modification tracking
-- **Disassembler** — Native disassembly via `objdump`/`llvm-objdump` with a parsed function list; click any function to jump to it (`Ctrl+Shift+D`)
+- **Disassembler** — Native disassembly via `objdump`/`llvm-objdump` with a parsed function list; click any function to jump to it (`Ctrl+Alt+D`)
 - **Binary Inspector** — Pure native ELF and PE parser: headers, sections, imports/symbols, MD5 hashing, and string extraction — no external tools required (`Ctrl+Shift+I`)
 - **Markdown Preview** — Live split-panel rendered preview with full dark theme, tables, code blocks, images, and task lists (`Ctrl+Shift+M`)
 - **Neural Code Graph** — Force-directed dependency graph of all `#include` relations in the workspace, physics-simulated with draggable nodes (`Ctrl+Shift+N`)
 - **Ghost Replay Mode** — Replays every insertion and deletion made since the file was opened, letting you watch the session back event-by-event (`Ctrl+Shift+G`)
 - **File Watcher** — Detects external file changes and prompts to reload
-- **AI Autocomplete** — Configurable AI-powered completions via any OpenAI-compatible API; explicit support for Groq, OpenRouter, and Together AI (Plugins menu)
+- **AI Autocomplete** — Configurable OpenAI-compatible completions shown as muted ghost text; press `Tab` to accept or `Esc` to dismiss (Plugins menu)
 - **Zero-Trace Paranoia Mode** — Global toggle that suppresses all disk persistence (recent files, session stats, auto-saves, file watching) for sensitive security sessions. Shows a glowing `☣ PARANOIA` pill in the status bar (`Ctrl+Alt+P`, `v2.0`)
 - **Laser Vuln Underlines** — Native background regex scanner flags hardcoded secrets, unsafe C/C++ functions, and Solidity anti-patterns with glowing red laser underlines and a cyber-HUD tooltip (`Ctrl+Alt+X`, `v2.0`)
 
@@ -110,7 +110,7 @@ Jim has a native binary analysis workflow requiring no external tools:
 | Tool | Trigger | What it does |
 |------|---------|--------------|
 | Hex Editor | Auto on binary open | View/edit raw bytes |
-| Disassembler | `Ctrl+Shift+D` | Disassemble via objdump, parsed function list |
+| Disassembler | `Ctrl+Alt+D` | Disassemble via objdump, parsed function list |
 | Binary Inspector | `Ctrl+Shift+I` | ELF/PE headers, sections, imports, strings |
 
 Right-click any file in the Explorer to access all three tools directly.
@@ -169,7 +169,7 @@ brew install qt@6
 **Windows:**
 No prerequisites beyond Qt6 — use the PowerShell build script below. The build script auto-locates Qt6 and MinGW.
 
-> **Note:** The integrated terminal on Linux/macOS uses a simple QProcess-based shell. There is no dependency on `qtermwidget` or any external terminal library — the terminal works out of the box on all platforms.
+> **Note:** The integrated terminal uses one persistent QProcess shell (your `$SHELL` on Unix, `cmd.exe` on Windows), so commands such as `cd` persist for the session. It is a lightweight command console, not a full PTY emulator.
 
 ---
 
@@ -365,7 +365,7 @@ Jim now speaks story. Open any `.story`, `.tw`, or `.twee` file and a whole new 
 
 ### v0.4.0
 - Added **Markdown Preview** — live split-panel rendered preview (`Ctrl+Shift+M`). Supports headers, tables, code blocks with language labels, images, task lists, blockquotes, strikethrough, highlights, and raw HTML passthrough. Updates with 400 ms debounce as you type. No external libraries.
-- Added **Disassembler** — wraps `objdump`/`llvm-objdump`, displays assembly with full syntax highlighting, parsed function list with click-to-jump (`Ctrl+Shift+D`)
+- Added **Disassembler** — wraps `objdump`/`llvm-objdump`, displays assembly with full syntax highlighting, parsed function list with click-to-jump (`Ctrl+Alt+D`)
 - Added **Binary Inspector** — pure native ELF and PE parser (`Ctrl+Shift+I`): headers, sections, imports, MD5 hash, extracted strings. Handles ELF32/64 LE/BE and PE32/PE32+
 - Added **Tools menu** with all binary analysis actions
 - Added **right-click context menu** on file tree: Open, Hex Editor, Disassemble, Binary Inspector, Reveal in Explorer

@@ -22,25 +22,12 @@ INCLUDEPATH += \
     include/analysis \
     include/story
 
-# Optionally link QTermWidget for a richer terminal experience on Unix
-unix {
-    CONFIG += link_pkgconfig
-    packagesExist(qtermwidget5) {
-        PKGCONFIG += qtermwidget5
-        DEFINES += USE_QTERMWIDGET
-        message("qtermwidget5 found — enabling enhanced terminal")
-    } else {
-        message("qtermwidget5 not found — using built-in QProcess terminal")
-    }
-}
-
 win32 {
     LIBS += -lole32 -luuid
 }
 
 SOURCES += src/app/main.cpp \
            src/app/breadcrumb_bar.cpp \
-           src/app/command_palette.cpp \
            src/app/draggable_tabs.cpp \
            src/app/find_bar.cpp \
            src/app/search_everywhere.cpp \
@@ -79,7 +66,6 @@ SOURCES += src/app/main.cpp \
            src/story/storyplaytest.cpp
 HEADERS += include/app/texteditor.h \
            include/app/breadcrumb_bar.h \
-           include/app/command_palette.h \
            include/app/draggable_tabs.h \
            include/app/find_bar.h \
            include/app/search_everywhere.h \

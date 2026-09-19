@@ -6,6 +6,7 @@
 #include <QList>
 #include <QMainWindow>
 #include <QMap>
+#include <QKeySequence>
 #include <QStringList>
 #include <QTextCursor>
 #include <QVector>
@@ -26,7 +27,6 @@ class AIAutocomplete;
 class AnimationWidget;
 class BinaryInspectorWidget;
 class BreadcrumbBar;
-class CommandPalette;
 class DisassemblerWidget;
 class DJVisualizerWidget;
 class DJVisualizerWindow;
@@ -129,7 +129,8 @@ private slots:
     void onStoryPassageClicked(const QString &passageName);
     void refreshStoryPanels();
     void toggleAIAutocomplete(bool enabled);
-    void onAISuggestion(const QString &suggestion);
+    void onAISuggestion(QPlainTextEdit *editor, int position, int revision,
+                        const QString &suggestion);
     // Tools
     void openDisassembler();
     void openBinaryInspector();
@@ -196,6 +197,7 @@ private:
     };
 
     void createActions();
+    void validateShortcuts();
     void createMenus();
     void createStatusBar();
     void clampToScreen();
@@ -248,6 +250,7 @@ private:
     QTabWidget *tabWidget = nullptr;
     QTabWidget *tabWidget2 = nullptr;
     QTabWidget *activeTabWidget = nullptr;
+    QLabel *splitEmptyLabel = nullptr;
     WelcomeWidget *welcomeWidget = nullptr;
     BreadcrumbBar *breadcrumbBar = nullptr;
     FindBar *findBar = nullptr;
@@ -260,6 +263,7 @@ private:
     QString currentFolder;
     QStringList recentFiles;
     QMap<CodeEditor*, SyntaxHighlighter*> highlighters;
+    QMap<QString, QAction*> shortcutRegistry;
     SearchState searchState;
 
     // Global editor preferences/state
@@ -327,7 +331,6 @@ private:
 
     // Scratchpad / command UI
     QPlainTextEdit *scratchpadEditor = nullptr;
-    CommandPalette *commandPalette = nullptr;
     TodoPanel *todoPanel = nullptr;
     QDockWidget *todoDock = nullptr;
 
@@ -454,6 +457,8 @@ private:
     void toggleImagePreview();
     void showSessionStats();
     void applyPaneDimming();
+    void updateContextualActions();
+    void updateSplitEmptyState();
     void propagateV080Settings(CodeEditor *ed);
     void propagateV090Settings(CodeEditor *ed);
     void changeEvent(QEvent *e) override;

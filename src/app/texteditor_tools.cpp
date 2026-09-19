@@ -324,8 +324,27 @@ void TextEditor::showSessionStats() {
 }
 
 void TextEditor::openCommandPalette() {
-    if (!commandPalette)
-        commandPalette = new CommandPalette(this);
+    if (searchEverywhere && searchEverywhere->isVisible())
+        return;
+    if (!searchEverywhere) {
+        searchEverywhere = new SearchEverywhere(this);
+        connect(searchEverywhere, &SearchEverywhere::fileRequested,
+                this, &TextEditor::loadFile);
+        connect(searchEverywhere, &SearchEverywhere::symbolRequested,
+                this, [this](const QString &path, int line) {
+                    QTabWidget *pane = nullptr;
+                    if (auto *widget = findOpenDocument(normalizedPath(path), &pane)) {
+                        activeTabWidget = pane;
+                        pane->setCurrentWidget(widget);
+                        if (auto *editor = qobject_cast<CodeEditor *>(widget)) {
+                            QTextCursor cursor(editor->document()->findBlockByLineNumber(line));
+                            editor->setTextCursor(cursor);
+                            editor->centerCursor();
+                            editor->setFocus();
+                        }
+                    }
+                });
+    }
 
     // Collect every QAction from all menus recursively
     QList<QAction*> actions;
@@ -341,14 +360,14 @@ void TextEditor::openCommandPalette() {
         if (act->menu()) collect(act->menu());
     }
 
-    commandPalette->populate(actions);
+    searchEverywhere->populate(actions, {}, {}, {}, true);
 
     // Centre it below the menu bar
     QRect geo = geometry();
-    int cx = geo.left() + (geo.width() - commandPalette->width()) / 2;
+    int cx = geo.left() + (geo.width() - searchEverywhere->width()) / 2;
     int cy = geo.top() + 60;
-    commandPalette->move(cx, cy);
-    commandPalette->exec();
+    searchEverywhere->move(cx, cy);
+    searchEverywhere->exec();
 }
 
 void TextEditor::toggleTodoPanel() {

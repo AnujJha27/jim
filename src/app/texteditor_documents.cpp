@@ -137,6 +137,13 @@ void TextEditor::closeTab(int index, QTabWidget *targetWidget) {
     }
     tw->removeTab(index);
     page->deleteLater();
+    if (tw == tabWidget2 && tw->count() == 0 && editorPrefs.splitViewEnabled) {
+      editorPrefs.splitViewEnabled = false;
+      splitViewAct->setChecked(false);
+      tabWidget2->hide();
+      activeTabWidget = tabWidget;
+    }
+    updateSplitEmptyState();
     if (tw == tabWidget && tw->count() == 0)
       showWelcomeScreen();
   }
@@ -146,6 +153,16 @@ void TextEditor::tabChanged(int) {
   if (auto *source = qobject_cast<QTabWidget *>(sender()))
     activeTabWidget = source;
   QTabWidget *tw = currentTabWidget();
+  if (tabWidget2) {
+    tabWidget->setProperty("activePane", tw == tabWidget);
+    tabWidget2->setProperty("activePane", tw == tabWidget2);
+    tabWidget->style()->unpolish(tabWidget);
+    tabWidget->style()->polish(tabWidget);
+    tabWidget2->style()->unpolish(tabWidget2);
+    tabWidget2->style()->polish(tabWidget2);
+    updateSplitEmptyState();
+    applyPaneDimming();
+  }
   updateStatusBar();
   updateBreadcrumb();
 
@@ -204,6 +221,7 @@ void TextEditor::tabChanged(int) {
 
     languageLabel->setText("Binary (Hex)");
   }
+  updateContextualActions();
 }
 
 void TextEditor::findText() {
@@ -230,13 +248,31 @@ void TextEditor::onFindTextChanged(const QString &text) {
     }
 
     QString content = editor->toPlainText();
-    QRegularExpression re(QRegularExpression::escape(text), QRegularExpression::CaseInsensitiveOption);
+    QString expression = findBar->isRegex() ? text : QRegularExpression::escape(text);
+    if (findBar->isWholeWord())
+        expression = "(?<![\\w])(?:" + expression + ")(?![\\w])";
+    QRegularExpression::PatternOptions options = QRegularExpression::NoPatternOption;
+    if (!findBar->isCaseSensitive())
+        options |= QRegularExpression::CaseInsensitiveOption;
+    QRegularExpression re(expression, options);
+    if (!re.isValid()) {
+        updateSearchHighlights();
+        findBar->setMatchCount(0, 0);
+        return;
+    }
     QRegularExpressionMatchIterator i = re.globalMatch(content);
-    
+    const QTextCursor selection = editor->textCursor();
+    const int selectionStart = findBar->isSelectionOnly() && selection.hasSelection()
+        ? selection.selectionStart() : 0;
+    const int selectionEnd = findBar->isSelectionOnly() && selection.hasSelection()
+        ? selection.selectionEnd() : content.size();
+
     int currentPos = editor->textCursor().position();
     
     while (i.hasNext()) {
         QRegularExpressionMatch match = i.next();
+        if (match.capturedStart() < selectionStart || match.capturedEnd() > selectionEnd)
+            continue;
         QTextCursor cursor(editor->document());
         cursor.setPosition(match.capturedStart());
         cursor.setPosition(match.capturedEnd(), QTextCursor::KeepAnchor);
@@ -319,8 +355,22 @@ void TextEditor::replaceText() {
     return;
   searchState.lastText = findStr;
   QString content = editor->toPlainText();
-  content.replace(findStr, replaceStr);
-  editor->setPlainText(content);
+  QString expression = findBar->isRegex() ? findStr : QRegularExpression::escape(findStr);
+  if (findBar->isWholeWord())
+    expression = "(?<![\\w])(?:" + expression + ")(?![\\w])";
+  QRegularExpression re(expression,
+                         findBar->isCaseSensitive() ? QRegularExpression::NoPatternOption
+                                                     : QRegularExpression::CaseInsensitiveOption);
+  if (!re.isValid()) return;
+  if (findBar->isSelectionOnly() && editor->textCursor().hasSelection()) {
+    QTextCursor selection = editor->textCursor();
+    QString selected = selection.selectedText();
+    selected.replace(re, replaceStr);
+    selection.insertText(selected);
+  } else {
+    content.replace(re, replaceStr);
+    editor->setPlainText(content);
+  }
 }
 
 void TextEditor::goToLine() {
@@ -721,10 +771,36 @@ void TextEditor::closeEvent(QCloseEvent *event) {
 void TextEditor::readSettings() {
   QSettings settings("TextEditor", "Settings");
   recentFiles = settings.value("recentFiles").toStringList();
+  sessionSecondsAccumulated = settings.value("sessionSeconds", 0).toInt();
   editorPrefs.fontSize = settings.value("fontSize", 11).toInt();
   editorPrefs.editorFontFamily = settings.value("editorFont", "Consolas").toString();
   editorPrefs.wordWrapEnabled = settings.value("wordWrap", false).toBool();
+  editorPrefs.stickyScrollEnabled = settings.value("stickyScroll", false).toBool();
+  editorPrefs.invisibleCharsEnabled = settings.value("invisibleChars", false).toBool();
+  editorPrefs.gitBlameEnabled = settings.value("gitBlame", false).toBool();
+  editorPrefs.autoSaveFocusEnabled = settings.value("autoSaveFocus", false).toBool();
+  editorPrefs.currentThemeIndex = qBound(0, settings.value("theme", 0).toInt(),
+                                         qMax(0, editorPrefs.themes.size() - 1));
+  const bool restoreSplitView = settings.value("splitView", false).toBool();
+  editorPrefs.splitViewEnabled = false;
+  if (settings.contains("geometry")) restoreGeometry(settings.value("geometry").toByteArray());
+  if (settings.contains("windowState")) restoreState(settings.value("windowState").toByteArray());
+  if (settings.contains("editorSplitter"))
+    mainSplitter->setSizes(settings.value("editorSplitter").value<QList<int>>());
+  if (settings.contains("verticalSplitter"))
+    verticalSplitter->setSizes(settings.value("verticalSplitter").value<QList<int>>());
   wordWrapAct->setChecked(editorPrefs.wordWrapEnabled);
+  stickyScrollAct->setChecked(editorPrefs.stickyScrollEnabled);
+  invisibleCharsAct->setChecked(editorPrefs.invisibleCharsEnabled);
+  gitBlameAct->setChecked(editorPrefs.gitBlameEnabled);
+  autoSaveFocusAct->setChecked(editorPrefs.autoSaveFocusEnabled);
+  splitViewAct->setChecked(false);
+  markdownPreviewAct->setChecked(settings.value("markdownPreview", false).toBool());
+  applyThemeToAllEditors();
+  if (restoreSplitView)
+    QTimer::singleShot(0, this, &TextEditor::toggleSplitView);
+  if (markdownPreviewAct->isChecked())
+    QTimer::singleShot(0, this, [this]() { setMarkdownPreviewVisible(true); });
 }
 
 void TextEditor::writeSettings() {
@@ -734,6 +810,17 @@ void TextEditor::writeSettings() {
   settings.setValue("fontSize", editorPrefs.fontSize);
   settings.setValue("editorFont", editorPrefs.editorFontFamily);
   settings.setValue("wordWrap", editorPrefs.wordWrapEnabled);
+  settings.setValue("stickyScroll", editorPrefs.stickyScrollEnabled);
+  settings.setValue("invisibleChars", editorPrefs.invisibleCharsEnabled);
+  settings.setValue("gitBlame", editorPrefs.gitBlameEnabled);
+  settings.setValue("autoSaveFocus", editorPrefs.autoSaveFocusEnabled);
+  settings.setValue("theme", editorPrefs.currentThemeIndex);
+  settings.setValue("splitView", editorPrefs.splitViewEnabled);
+  settings.setValue("markdownPreview", markdownPreviewAct && markdownPreviewAct->isChecked());
+  settings.setValue("geometry", saveGeometry());
+  settings.setValue("windowState", saveState());
+  settings.setValue("editorSplitter", QVariant::fromValue(mainSplitter->sizes()));
+  settings.setValue("verticalSplitter", QVariant::fromValue(verticalSplitter->sizes()));
 }
 
 bool TextEditor::maybeSave(int tabIndex, QTabWidget *targetWidget) {
@@ -1123,15 +1210,22 @@ void TextEditor::toggleSplitView() {
           closeTab(index, tabWidget2);
       });
       connect(tabWidget2, &QTabWidget::currentChanged, this, &TextEditor::tabChanged);
+      tabWidget2->installEventFilter(this);
+      splitEmptyLabel = new QLabel("Drag a tab here", tabWidget2);
+      splitEmptyLabel->setAlignment(Qt::AlignCenter);
+      splitEmptyLabel->setStyleSheet("color:#777; font-size:13px; background:transparent;");
+      splitEmptyLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
       
       mainSplitter->addWidget(tabWidget2);
     }
     tabWidget2->show();
+    updateSplitEmptyState();
   } else {
     if (tabWidget2) {
       tabWidget2->hide();
       if (activeTabWidget == tabWidget2)
         activeTabWidget = tabWidget;
+      if (splitEmptyLabel) splitEmptyLabel->hide();
     }
   }
 }
@@ -1221,4 +1315,5 @@ void TextEditor::applyThemeToEditor(CodeEditor *editor,
 void TextEditor::applyThemeToAllEditors() {
   for (CodeEditor *editor : allEditors())
     applyThemeToEditor(editor, highlighters.value(editor));
+  applyModernStyle();
 }

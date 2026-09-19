@@ -78,10 +78,14 @@ SearchEverywhere::SearchEverywhere(QWidget *parent) : QDialog(parent) {
 
 void SearchEverywhere::populate(const QList<QAction*> &actions,
                                 const QStringList &recentFiles,
-                                const QStringList &openFiles) {
+                                const QStringList &openFiles,
+                                const QList<Symbol> &symbols,
+                                bool commandsOnlyMode) {
     allActions = actions;
     allRecent = recentFiles;
     allFiles = openFiles;
+    allSymbols = symbols;
+    commandsOnly = commandsOnlyMode;
     searchBox->clear();
     filter("");
     searchBox->setFocus();
@@ -91,7 +95,7 @@ void SearchEverywhere::filter(const QString &text) {
     resultList->clear();
     QString q = text.trimmed().toLower();
 
-    for (const QString &f : allFiles) {
+    if (!commandsOnly) for (const QString &f : allFiles) {
         QString bn = QFileInfo(f).fileName();
         if (q.isEmpty() || bn.toLower().contains(q) || f.toLower().contains(q)) {
             QListWidgetItem *item = new QListWidgetItem("📄  " + bn);
@@ -101,7 +105,7 @@ void SearchEverywhere::filter(const QString &text) {
         }
     }
 
-    for (const QString &f : allRecent) {
+    if (!commandsOnly) for (const QString &f : allRecent) {
         QString bn = QFileInfo(f).fileName();
         if (allFiles.contains(f)) {
             continue;
@@ -114,8 +118,18 @@ void SearchEverywhere::filter(const QString &text) {
         }
     }
 
+    if (!commandsOnly) for (const Symbol &symbol : allSymbols) {
+        if (q.isEmpty() || symbol.name.toLower().contains(q) ||
+            symbol.filePath.toLower().contains(q)) {
+            auto *item = new QListWidgetItem("[symbol] " + symbol.name);
+            item->setData(Qt::UserRole, "symbol:" + symbol.filePath + ":" + QString::number(symbol.line));
+            item->setToolTip(symbol.filePath + ":" + QString::number(symbol.line + 1));
+            resultList->addItem(item);
+        }
+    }
+
     for (QAction *act : allActions) {
-        if (act->isSeparator() || act->text().isEmpty()) {
+        if (act->isSeparator() || act->text().isEmpty() || !act->isEnabled()) {
             continue;
         }
         QString name = act->text().remove('&');
@@ -141,6 +155,13 @@ void SearchEverywhere::runSelected() {
     if (data.startsWith("file:")) {
         emit fileRequested(data.mid(5));
         accept();
+    } else if (data.startsWith("symbol:")) {
+        const QString encoded = data.mid(7);
+        const int separator = encoded.lastIndexOf(':');
+        if (separator > 0) {
+            emit symbolRequested(encoded.left(separator), encoded.mid(separator + 1).toInt());
+            accept();
+        }
     } else if (data.startsWith("action:")) {
         QString name = data.mid(7);
         for (QAction *act : allActions) {

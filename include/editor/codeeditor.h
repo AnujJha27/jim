@@ -64,6 +64,8 @@ public:
     Language getLanguage() const { return currentLanguage; }
 
     void setSearchSelections(const QList<QTextCursor> &selections);
+    void setGhostText(const QString &text);
+    void clearGhostText();
     void addExtraCursor(const QTextCursor &c);
     void clearExtraCursors();
     void selectNextOccurrence();
@@ -130,6 +132,7 @@ private slots:
     void highlightCurrentLine();
     void updateLineNumberArea(const QRect &rect, int dy);
     void onDocumentContentsChange(int position, int charsRemoved, int charsAdded);
+    void rebuildPaintCache();
     void runVulnScan();
 
     friend class FoldingArea;
@@ -175,6 +178,10 @@ private:
     bool gasMinimapEnabled;
     bool memTraceEnabled;
     QVector<int> memTraceHighlightLines;
+    QString ghostText;
+    struct ColorMark { int offset; int length; QColor color; };
+    QMap<int, QVector<ColorMark>> colorMarks;
+    QTimer *paintCacheTimer = nullptr;
 };
 
 #endif

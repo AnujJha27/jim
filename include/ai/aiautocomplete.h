@@ -6,6 +6,9 @@
 #include <QNetworkReply>
 #include <QTimer>
 #include <QPlainTextEdit>
+#include <QPointer>
+
+class QNetworkReply;
 
 class AIAutocomplete : public QObject
 {
@@ -29,7 +32,8 @@ public:
     void trigger(QPlainTextEdit *editor);
 
 signals:
-    void suggestionReady(const QString &suggestion);
+    void suggestionReady(QPlainTextEdit *editor, int position, int revision,
+                         const QString &suggestion);
     void errorOccurred(const QString &error);
 
 private slots:
@@ -39,7 +43,10 @@ private slots:
 private:
     QNetworkAccessManager *m_networkManager;
     QTimer *m_debounceTimer;
-    QPlainTextEdit *m_currentEditor;
+    QPointer<QPlainTextEdit> m_currentEditor;
+    QNetworkReply *m_reply = nullptr;
+    int m_requestPosition = -1;
+    int m_requestRevision = -1;
     
     bool m_enabled;
     QString m_baseUrl;

@@ -7,6 +7,7 @@
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QVBoxLayout>
 
 TerminalWidget::TerminalWidget(QWidget *parent)
@@ -95,18 +96,19 @@ void TerminalWidget::startShell() {
         if (process)
             appendOutput(process->errorString());
     });
-    QProcess *shell = process;
-    connect(shell, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-            this, [this, shell]() {
-                if (process == shell)
+    QProcess *shellProcess = process;
+    connect(shellProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            this, [this, shellProcess]() {
+                if (process == shellProcess)
                     process = nullptr;
-                shell->deleteLater();
+                shellProcess->deleteLater();
             });
 
 #ifdef Q_OS_WIN
     process->start("cmd.exe");
 #else
-    process->start("/bin/sh");
+    const QString shellProgram = QProcessEnvironment::systemEnvironment().value("SHELL", "/bin/sh");
+    process->start(shellProgram);
 #endif
 }
 

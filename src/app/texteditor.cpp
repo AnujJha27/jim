@@ -64,6 +64,12 @@ TextEditor::TextEditor(QWidget *parent)
   sessionStart = QDateTime::currentDateTime();
   sessionDateString = sessionStart.date().toString(Qt::ISODate);
   sessionTimer = new QTimer(this);
+  connect(sessionTimer, &QTimer::timeout, this, [this]() {
+    if (!sessionTimeLabel || !sessionStart.isValid()) return;
+    const int seconds = sessionSecondsAccumulated +
+                        static_cast<int>(sessionStart.secsTo(QDateTime::currentDateTime()));
+    sessionTimeLabel->setText(QString("⏱ %1m").arg(seconds / 60));
+  });
   sessionTimer->start(1000);
   initializeThemes();
   createActions();
@@ -72,7 +78,8 @@ TextEditor::TextEditor(QWidget *parent)
   applyModernStyle();
   readSettings();
   setWindowTitle("Jim");
-  resize(1200, 800);
+  if (!QSettings("TextEditor", "Settings").contains("geometry"))
+    resize(1200, 800);
   showWelcomeScreen();
   // Install event filter for double-Shift Search Everywhere detection
   qApp->installEventFilter(this);
