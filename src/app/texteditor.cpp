@@ -176,6 +176,7 @@ void TextEditor::setupUI() {
 
   // Animation widget as a dockable pane
   animationDock = new QDockWidget("Animation", this);
+  animationDock->setObjectName("animationDock");
   animationDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
   animationWidget = new AnimationWidget(animationDock);
   animationDock->setWidget(animationWidget);
@@ -186,6 +187,7 @@ void TextEditor::setupUI() {
 
   // File tree dock
   fileTreeDock = new QDockWidget("Explorer", this);
+  fileTreeDock->setObjectName("fileTreeDock");
   fileTreeDock->setFeatures(QDockWidget::DockWidgetMovable |
                             QDockWidget::DockWidgetClosable);
 
@@ -238,6 +240,7 @@ void TextEditor::setupUI() {
 
   // Code Graveyard dock
   graveyardDock = new QDockWidget("Deleted Code", this);
+  graveyardDock->setObjectName("graveyardDock");
   graveyardDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
   graveyardWidget = new GraveyardWidget(graveyardDock);
   graveyardDock->setWidget(graveyardWidget);
@@ -259,6 +262,7 @@ void TextEditor::setupUI() {
   // ── Narrative Engine docks ────────────────────────────────────────────────
   storyGraph = new StoryGraph(this);
   storyGraphDock = new QDockWidget("Story Graph ✦", this);
+  storyGraphDock->setObjectName("storyGraphDock");
   storyGraphDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea | Qt::BottomDockWidgetArea);
   storyGraphDock->setWidget(storyGraph);
   storyGraphDock->setMinimumWidth(320);
@@ -269,6 +273,7 @@ void TextEditor::setupUI() {
 
   storyPlaytest = new StoryPlaytest(this);
   storyPlaytestDock = new QDockWidget("Playtest ▶", this);
+  storyPlaytestDock->setObjectName("storyPlaytestDock");
   storyPlaytestDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea | Qt::BottomDockWidgetArea);
   storyPlaytestDock->setWidget(storyPlaytest);
   storyPlaytestDock->setMinimumWidth(360);

@@ -697,6 +697,7 @@ void TextEditor::toggleDJMode() {
         if (!djVisualizerWidget) {
             djVisualizerWidget = new DJVisualizerWidget(this);
             djVisualizerDock = new QDockWidget("🎵 DJ Mode Visualizer", this);
+            djVisualizerDock->setObjectName("djVisualizerDock");
             djVisualizerDock->setWidget(djVisualizerWidget);
             djVisualizerDock->setAllowedAreas(Qt::TopDockWidgetArea | Qt::BottomDockWidgetArea);
             djVisualizerDock->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);

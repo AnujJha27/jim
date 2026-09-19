@@ -779,6 +779,7 @@ void TextEditor::showStorageSlotVisualizer() {
     if (!slotVisualizerDock) {
         slotVisualizerWidget = new StorageSlotVisualizerWidget(this);
         slotVisualizerDock = new QDockWidget("\U0001F5C4 Storage Slots", this);
+        slotVisualizerDock->setObjectName("slotVisualizerDock");
         slotVisualizerDock->setWidget(slotVisualizerWidget);
         slotVisualizerDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea | Qt::BottomDockWidgetArea);
         addDockWidget(Qt::RightDockWidgetArea, slotVisualizerDock);
