@@ -26,6 +26,11 @@ win32 {
     LIBS += -lole32 -luuid
 }
 
+linux {
+    CONFIG += link_pkgconfig
+    PKGCONFIG += libpulse-simple
+}
+
 SOURCES += src/app/main.cpp \
            src/app/breadcrumb_bar.cpp \
            src/app/draggable_tabs.cpp \

@@ -14,7 +14,15 @@ static const GUID KSDATAFORMAT_SUBTYPE_PCM_LOCAL        = { 0x00000001, 0x0000, 
 #define WAVE_FORMAT_IEEE_FLOAT 0x0003
 #endif
 
-#else // Linux / macOS — Qt Multimedia loopback capture
+#elif defined(Q_OS_LINUX)
+
+#include <QProcess>
+#include <QProcessEnvironment>
+#include <QStringList>
+#include <pulse/error.h>
+#include <pulse/simple.h>
+
+#else // macOS — Qt Multimedia loopback capture
 
 #include <QAudioSource>
 #include <QAudioDevice>
@@ -75,7 +83,7 @@ private:
     AudioMonitor*   m_monitor;
 };
 
-#endif // Q_OS_WIN
+#endif // Q_OS_WIN / Q_OS_LINUX
 
 AudioMonitor::AudioMonitor(QObject *parent) : QThread(parent) {
     m_levels.resize(64);
@@ -223,6 +231,83 @@ void AudioMonitor::run() {
     if (pDevice) pDevice->Release();
     if (pEnumerator) pEnumerator->Release();
     CoUninitialize();
+
+#elif defined(Q_OS_LINUX)
+    const QString configuredSource =
+        QProcessEnvironment::systemEnvironment().value("JIM_AUDIO_MONITOR").trimmed();
+    QString monitorSource = configuredSource;
+    if (monitorSource.isEmpty()) {
+        QProcess pactl;
+        pactl.start("pactl", {"list", "short", "sources"});
+        if (pactl.waitForFinished(1500)) {
+            const QStringList lines = QString::fromLocal8Bit(pactl.readAllStandardOutput())
+                                           .split('\n', Qt::SkipEmptyParts);
+            for (const QString &line : lines) {
+                const QStringList fields = line.simplified().split(' ', Qt::SkipEmptyParts);
+                if (fields.size() >= 2 && fields[1].contains("monitor", Qt::CaseInsensitive)) {
+                    monitorSource = fields[1];
+                    break;
+                }
+            }
+        }
+    }
+
+    if (monitorSource.isEmpty()) {
+        emit captureStatus("DJ Mode: pactl found no system-output monitor source.");
+        while (m_running)
+            msleep(100);
+        return;
+    }
+
+    const QByteArray sourceName = monitorSource.toLocal8Bit();
+    pa_sample_spec sampleSpec{};
+    sampleSpec.format = PA_SAMPLE_S16LE;
+    sampleSpec.rate = 44100;
+    sampleSpec.channels = 2;
+    int error = 0;
+    pa_simple *pulse = pa_simple_new(nullptr, "Jim", PA_STREAM_RECORD,
+                                     sourceName.constData(), "DJ Mode",
+                                     &sampleSpec, nullptr, nullptr, &error);
+    if (!pulse) {
+        emit captureStatus("DJ Mode: cannot open " + monitorSource + ": " +
+                           QString::fromLocal8Bit(pa_strerror(error)));
+        while (m_running)
+            msleep(100);
+        return;
+    }
+
+    emit captureStatus("DJ Mode: capturing " + monitorSource);
+    QByteArray buffer(4096, Qt::Uninitialized);
+    while (m_running) {
+        if (pa_simple_read(pulse, buffer.data(), static_cast<size_t>(buffer.size()), &error) < 0) {
+            emit captureStatus("DJ Mode capture stopped: " +
+                               QString::fromLocal8Bit(pa_strerror(error)));
+            break;
+        }
+
+        const auto *samples = reinterpret_cast<const qint16 *>(buffer.constData());
+        const int frames = buffer.size() / (sampleSpec.channels * sizeof(qint16));
+        const int blockSize = qMax(1, frames / 64);
+        {
+            QMutexLocker locker(&m_mutex);
+            for (int band = 0; band < 64; ++band) {
+                float sum = 0.0f;
+                int count = 0;
+                for (int frame = 0; frame < blockSize; ++frame) {
+                    const int index = band * blockSize + frame;
+                    if (index >= frames) break;
+                    const float left = samples[index * 2] / 32768.0f;
+                    const float right = samples[index * 2 + 1] / 32768.0f;
+                    sum += (left * left + right * right) * 0.5f;
+                    ++count;
+                }
+                const float rms = count ? std::sqrt(sum / count) : 0.0f;
+                m_levels[band] = qMin(1.0f, m_levels[band] * 0.7f + rms * 1.5f * 0.3f);
+            }
+        }
+        emit levelsUpdated();
+    }
+    pa_simple_free(pulse);
 
 #else
     // Linux / macOS: capture via Qt Multimedia.

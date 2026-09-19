@@ -20,6 +20,7 @@ if rg -q 'defaultAudioInput' src/audio/audiomonitor.cpp; then
     echo "DJ Mode must not capture microphone input" >&2
     exit 1
 fi
+grep -q 'pa_simple_new' src/audio/audiomonitor.cpp
 
 if rg -q 'command_palette|class CommandPalette' jim.pro include/app src/app; then
     echo "dead command-palette implementation remains" >&2
