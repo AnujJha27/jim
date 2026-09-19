@@ -684,8 +684,11 @@ void TextEditor::toggleDJMode() {
     if (active) {
         if (!audioMonitor) {
             audioMonitor = new AudioMonitor(this);
+            connect(audioMonitor, &AudioMonitor::captureStatus, this,
+                    [this](const QString &status) {
+                        statusBar()->showMessage(status, 6000);
+                    });
         }
-        audioMonitor->start();
         
         // Cap height before adding the dock so Qt can't grow past the screen
         setMaximumHeight(QGuiApplication::primaryScreen()->availableGeometry().height());
@@ -710,7 +713,7 @@ void TextEditor::toggleDJMode() {
         djVisualizerDock->raise();
         QTimer::singleShot(0, this, &TextEditor::clampToScreen);
 
-        // Make sure the audio monitor is running
+        // Start only after the visualizer is ready so status and repaint signals are connected.
         if (!audioMonitor->isRunning()) {
             audioMonitor->start();
         }

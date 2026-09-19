@@ -3,6 +3,8 @@
 #include <QVector>
 #include <QMutex>
 
+class QString;
+
 class AudioMonitor : public QThread {
     Q_OBJECT
 public:
@@ -14,6 +16,7 @@ public:
 
 signals:
     void levelsUpdated();
+    void captureStatus(const QString &status);
 
 protected:
     void run() override;

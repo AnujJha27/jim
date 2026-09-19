@@ -226,16 +226,25 @@ void AudioMonitor::run() {
 
 #else
     // Linux / macOS: capture via Qt Multimedia.
-    // On PulseAudio/PipeWire, "monitor" input devices are system-audio loopback sources.
-    // We prefer those; fall back to the default mic input if none found.
-
-    QAudioDevice device = QMediaDevices::defaultAudioInput();
+    // DJ Mode is output visualization only. Never fall back to a microphone.
+    QAudioDevice device;
     for (const QAudioDevice& dev : QMediaDevices::audioInputs()) {
-        if (dev.description().contains("monitor", Qt::CaseInsensitive)) {
+        if (dev.description().contains("monitor", Qt::CaseInsensitive) ||
+            QString::fromUtf8(dev.id()).contains("monitor", Qt::CaseInsensitive)) {
             device = dev;
             break;
         }
     }
+
+    if (device.isNull()) {
+        emit captureStatus("DJ Mode: no system-output monitor is available. "
+                           "Enable a PulseAudio/PipeWire monitor source.");
+        while (m_running)
+            msleep(100);
+        return;
+    }
+
+    emit captureStatus("DJ Mode: capturing " + device.description());
 
     QAudioFormat format;
     format.setSampleRate(44100);

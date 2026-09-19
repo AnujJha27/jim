@@ -15,6 +15,11 @@ grep -q 'validateShortcuts' src/app/texteditor_actions.cpp
 grep -q 'QProcessEnvironment::systemEnvironment' src/app/terminal_widget.cpp
 grep -q 'rebuildPaintCache' src/editor/codeeditor.cpp
 grep -q 'byName.contains(c.target)' src/story/storygraph.cpp
+grep -q 'Never fall back to a microphone' src/audio/audiomonitor.cpp
+if rg -q 'defaultAudioInput' src/audio/audiomonitor.cpp; then
+    echo "DJ Mode must not capture microphone input" >&2
+    exit 1
+fi
 
 if rg -q 'command_palette|class CommandPalette' jim.pro include/app src/app; then
     echo "dead command-palette implementation remains" >&2
