@@ -113,7 +113,10 @@ void StoryGraph::buildGraph(const QVector<StoryPassage> &passages)
         QString cur = q.dequeue();
         if (!byName.contains(cur)) continue;
         for (const auto &c : byName[cur]->choices) {
-            if (!reachable.contains(c.target)) { reachable.insert(c.target); q.enqueue(c.target); }
+            if (byName.contains(c.target) && !reachable.contains(c.target)) {
+                reachable.insert(c.target);
+                q.enqueue(c.target);
+            }
         }
     }
 

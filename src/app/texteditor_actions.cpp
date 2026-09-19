@@ -24,7 +24,7 @@ void TextEditor::createActions() {
   closeTabAct = new QAction("&Close Tab", this);
   closeTabAct->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_W));
   connect(closeTabAct, &QAction::triggered, this,
-          [this]() { closeTab(tabWidget->currentIndex()); });
+          [this]() { closeTab(currentTabWidget()->currentIndex(), currentTabWidget()); });
 
   exitAct = new QAction("E&xit", this);
   exitAct->setShortcuts(QKeySequence::Quit);
@@ -229,7 +229,7 @@ void TextEditor::createActions() {
   markdownPreviewAct->setChecked(false);
   markdownPreviewAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_M));
   markdownPreviewAct->setStatusTip("Toggle split Markdown preview panel");
-  connect(markdownPreviewAct, &QAction::triggered, this, &TextEditor::toggleMarkdownPreview);
+  connect(markdownPreviewAct, &QAction::toggled, this, &TextEditor::setMarkdownPreviewVisible);
 
   // ── Tools actions ────────────────────────────────────────────────────────
   disassembleAct = new QAction("&Disassemble File...", this);
@@ -342,9 +342,11 @@ void TextEditor::createActions() {
               hex->setProperty("fileName", ed->getFileName());
               connect(hex, &HexEditor::modificationChanged,
                       this, &TextEditor::documentWasModified);
-              int idx = tabWidget->addTab(hex, "[HEX] " + strippedName(ed->getFileName()));
-              tabWidget->setCurrentIndex(idx);
-              flashTabLabel(idx);
+              QTabWidget *tw = currentTabWidget();
+              int idx = tw->addTab(hex, "[HEX] " + strippedName(ed->getFileName()));
+              tw->setCurrentIndex(idx);
+              activeTabWidget = tw;
+              flashTabLabel(idx, tw);
           }
       }
   });
@@ -434,10 +436,8 @@ void TextEditor::createActions() {
   memTraceAct->setCheckable(true);
   memTraceAct->setStatusTip("Enable: click on 0x40/memory offsets in Yul to highlight all mload/mstore ops");
   connect(memTraceAct, &QAction::triggered, this, [this](bool checked) {
-      int i = 0;
-      while (auto *ed = qobject_cast<CodeEditor*>(tabWidget->widget(i++)))
+      for (CodeEditor *ed : allEditors())
           ed->setMemTraceEnabled(checked);
-      if (tabWidget2) { int j = 0; while (auto *ed = qobject_cast<CodeEditor*>(tabWidget2->widget(j++))) ed->setMemTraceEnabled(checked); }
   });
 }
 
@@ -592,7 +592,7 @@ void TextEditor::createMenus() {
 
 void TextEditor::showAISettings() {
     AISettingsDialog dialog(this);
-    QSettings settings;
+    QSettings settings("TextEditor", "Settings");
     dialog.setSettings(settings.value("ai/baseUrl").toString(),
                        settings.value("ai/apiKey").toString(),
                        settings.value("ai/model").toString(),

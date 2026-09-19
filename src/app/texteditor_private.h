@@ -65,6 +65,7 @@
 #include <QMessageBox>
 #include <QMimeData>
 #include <QNetworkRequest>
+#include <QNetworkAccessManager>
 #include <QPainter>
 #include <QPainterPath>
 #include <QProcess>
@@ -78,6 +79,7 @@
 #include <QScrollBar>
 #include <QSettings>
 #include <QSoundEffect>
+#include <QStringDecoder>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStandardPaths>

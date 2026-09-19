@@ -59,8 +59,10 @@ void TextEditor::newFile() {
   propagateV080Settings(editor);
   propagateV090Settings(editor);
   connect(editor, &CodeEditor::keyPressed, this, &TextEditor::trackKeystroke);
-  int index = tabWidget->addTab(editor, "Untitled");
-  tabWidget->setCurrentIndex(index);
+  QTabWidget *tw = currentTabWidget();
+  int index = tw->addTab(editor, "Untitled");
+  tw->setCurrentIndex(index);
+  activeTabWidget = tw;
   editor->setFocus();
   QTimer::singleShot(0, this, &TextEditor::clampToScreen);
 }
@@ -71,13 +73,6 @@ void TextEditor::openFile() {
       "All Files (*);;Text Files (*.txt);;Story Files (*.story *.tw *.twee);;C++ Files (*.cpp *.h);;Python Files "
       "(*.py);;JavaScript (*.js *.ts);;Rust (*.rs);;Go (*.go)");
   if (!fileName.isEmpty()) {
-    for (int i = 0; i < tabWidget->count(); ++i) {
-      CodeEditor *editor = qobject_cast<CodeEditor *>(tabWidget->widget(i));
-      if (editor && editor->getFileName() == fileName) {
-        tabWidget->setCurrentIndex(i);
-        return;
-      }
-    }
     loadFile(fileName);
   }
 }
@@ -89,27 +84,30 @@ void TextEditor::openRecentFile() {
 }
 
 bool TextEditor::saveFile() {
+  QTabWidget *tw = currentTabWidget();
+  QWidget *document = tw ? tw->currentWidget() : nullptr;
   CodeEditor *editor = currentEditor();
   if (!editor) {
-    HexEditor *hexEditor =
-        qobject_cast<HexEditor *>(tabWidget->currentWidget());
+    HexEditor *hexEditor = qobject_cast<HexEditor *>(document);
     if (hexEditor) {
       QString fileName = hexEditor->property("fileName").toString();
       if (fileName.isEmpty())
         return saveFileAs();
-      return saveFileToPath(fileName);
+      return saveFileToPath(fileName, document);
     }
     return false;
   }
   if (editor->getFileName().isEmpty())
     return saveFileAs();
   else
-    return saveFileToPath(editor->getFileName());
+    return saveFileToPath(editor->getFileName(), document);
 }
 
 bool TextEditor::saveFileAs() {
   CodeEditor *editor = currentEditor();
-  HexEditor *hexEditor = qobject_cast<HexEditor *>(tabWidget->currentWidget());
+  QTabWidget *tw = currentTabWidget();
+  QWidget *document = tw ? tw->currentWidget() : nullptr;
+  HexEditor *hexEditor = qobject_cast<HexEditor *>(document);
   if (!editor && !hexEditor)
     return false;
 
@@ -119,32 +117,40 @@ bool TextEditor::saveFileAs() {
                                    "Files (*.cpp *.h);;Python Files (*.py)");
   if (fileName.isEmpty())
     return false;
-  return saveFileToPath(fileName);
+  return saveFileToPath(fileName, document);
 }
 
-void TextEditor::closeTab(int index) {
-  if (tabWidget->widget(index) == welcomeWidget) {
-    tabWidget->removeTab(index);
+void TextEditor::closeTab(int index, QTabWidget *targetWidget) {
+  QTabWidget *tw = targetWidget ? targetWidget : currentTabWidget();
+  if (!tw || index < 0 || index >= tw->count())
+    return;
+  QWidget *page = tw->widget(index);
+  if (page == welcomeWidget) {
+    tw->removeTab(index);
     return;
   }
-  if (maybeSave(index)) {
-    CodeEditor *editor = qobject_cast<CodeEditor *>(tabWidget->widget(index));
+  if (maybeSave(index, tw)) {
+    CodeEditor *editor = qobject_cast<CodeEditor *>(page);
     if (editor) {
       unwatchFile(editor->getFileName());
       highlighters.remove(editor);
     }
-    tabWidget->removeTab(index);
-    if (tabWidget->count() == 0)
+    tw->removeTab(index);
+    page->deleteLater();
+    if (tw == tabWidget && tw->count() == 0)
       showWelcomeScreen();
   }
 }
 
 void TextEditor::tabChanged(int) {
+  if (auto *source = qobject_cast<QTabWidget *>(sender()))
+    activeTabWidget = source;
+  QTabWidget *tw = currentTabWidget();
   updateStatusBar();
   updateBreadcrumb();
 
   // Keep markdown preview in sync when switching tabs
-  if (markdownPreview && markdownPreview->isVisible()) {
+  if (markdownPreview && markdownPreviewAct->isChecked()) {
       CodeEditor *ed = currentEditor();
       if (ed && ed != markdownEditor)
           connectMarkdownPreview(ed);
@@ -154,7 +160,7 @@ void TextEditor::tabChanged(int) {
   }
 
   CodeEditor *editor = currentEditor();
-  HexEditor *hexEditor = qobject_cast<HexEditor *>(tabWidget->currentWidget());
+  HexEditor *hexEditor = qobject_cast<HexEditor *>(tw ? tw->currentWidget() : nullptr);
   if (editor) {
     QString title = "Jim";
     if (!editor->getFileName().isEmpty())
@@ -164,13 +170,13 @@ void TextEditor::tabChanged(int) {
     setWindowTitle(title);
 
     // Update tab text with asterisk if modified
-    int currentIdx = tabWidget->currentIndex();
+    int currentIdx = tw->currentIndex();
     QString tabText = strippedName(editor->getFileName());
     if (tabText.isEmpty())
       tabText = "Untitled";
     if (editor->isModified())
       tabText = "*" + tabText;
-    tabWidget->setTabText(currentIdx, tabText);
+    tw->setTabText(currentIdx, tabText);
 
     // Update language label
     Language lang = editor->getLanguage();
@@ -190,11 +196,11 @@ void TextEditor::tabChanged(int) {
     setWindowTitle(title);
 
     // Update tab text with asterisk
-    int currentIdx = tabWidget->currentIndex();
+    int currentIdx = tw->currentIndex();
     QString tabText = "[HEX] " + strippedName(fileName);
     if (hexEditor->isModified())
       tabText = "*" + tabText;
-    tabWidget->setTabText(currentIdx, tabText);
+    tw->setTabText(currentIdx, tabText);
 
     languageLabel->setText("Binary (Hex)");
   }
@@ -332,7 +338,8 @@ void TextEditor::goToLine() {
 }
 
 void TextEditor::documentWasModified() {
-  tabChanged(tabWidget->currentIndex());
+  QTabWidget *tw = currentTabWidget();
+  tabChanged(tw ? tw->currentIndex() : -1);
   // Refresh story panels live as the user types
   CodeEditor *ed = currentEditor();
   if (ed && ed->getLanguage() == Language::Story) {
@@ -354,26 +361,20 @@ void TextEditor::updateStatusBar() {
 
 void TextEditor::increaseFontSize() {
   editorPrefs.fontSize++;
-  for (int i = 0; i < tabWidget->count(); ++i) {
-    CodeEditor *editor = qobject_cast<CodeEditor *>(tabWidget->widget(i));
-    if (editor) {
-      QFont font = editor->font();
-      font.setPointSize(editorPrefs.fontSize);
-      editor->setFont(font);
-    }
+  for (CodeEditor *editor : allEditors()) {
+    QFont font = editor->font();
+    font.setPointSize(editorPrefs.fontSize);
+    editor->setFont(font);
   }
 }
 
 void TextEditor::decreaseFontSize() {
   if (editorPrefs.fontSize > 6) {
     editorPrefs.fontSize--;
-    for (int i = 0; i < tabWidget->count(); ++i) {
-      CodeEditor *editor = qobject_cast<CodeEditor *>(tabWidget->widget(i));
-      if (editor) {
-        QFont font = editor->font();
-        font.setPointSize(editorPrefs.fontSize);
-        editor->setFont(font);
-      }
+    for (CodeEditor *editor : allEditors()) {
+      QFont font = editor->font();
+      font.setPointSize(editorPrefs.fontSize);
+      editor->setFont(font);
     }
   }
 }
@@ -450,13 +451,10 @@ void TextEditor::selectFont() {
       return;
 
   editorPrefs.editorFontFamily = combo->currentText();
-  for (int i = 0; i < tabWidget->count(); ++i) {
-      auto *editor = qobject_cast<CodeEditor *>(tabWidget->widget(i));
-      if (editor) {
-          QFont f(editorPrefs.editorFontFamily, editorPrefs.fontSize);
-          f.setStyleStrategy(QFont::PreferDefault);
-          editor->setFont(f);
-      }
+  for (CodeEditor *editor : allEditors()) {
+      QFont f(editorPrefs.editorFontFamily, editorPrefs.fontSize);
+      f.setStyleStrategy(QFont::PreferDefault);
+      editor->setFont(f);
   }
   flashStatusMessage(QString("Font: %1").arg(editorPrefs.editorFontFamily), QColor("#98c379"));
 }
@@ -464,12 +462,9 @@ void TextEditor::selectFont() {
 void TextEditor::toggleWordWrap() {
   editorPrefs.wordWrapEnabled = !editorPrefs.wordWrapEnabled;
   wordWrapAct->setChecked(editorPrefs.wordWrapEnabled);
-  for (int i = 0; i < tabWidget->count(); ++i) {
-    CodeEditor *editor = qobject_cast<CodeEditor *>(tabWidget->widget(i));
-    if (editor)
-      editor->setLineWrapMode(editorPrefs.wordWrapEnabled ? QPlainTextEdit::WidgetWidth
-                                              : QPlainTextEdit::NoWrap);
-  }
+  for (CodeEditor *editor : allEditors())
+    editor->setLineWrapMode(editorPrefs.wordWrapEnabled ? QPlainTextEdit::WidgetWidth
+                                            : QPlainTextEdit::NoWrap);
 }
 
 void TextEditor::animateTerminalShow() {
@@ -626,15 +621,11 @@ void TextEditor::toggleTypingSound() {
         typingSound->setSource(QUrl::fromLocalFile(tempPath));
         typingSound->setVolume(0.5f);
         
-        for (int i=0; i<tabWidget->count(); i++) {
-            CodeEditor *ed = qobject_cast<CodeEditor*>(tabWidget->widget(i));
-            if (ed) connect(ed, &CodeEditor::characterTyped, typingSound, &QSoundEffect::play);
-        }
+        for (CodeEditor *ed : allEditors())
+            connect(ed, &CodeEditor::characterTyped, typingSound, &QSoundEffect::play);
     } else if (!typingSoundEnabled && typingSound) {
-        for (int i=0; i<tabWidget->count(); i++) {
-            CodeEditor *ed = qobject_cast<CodeEditor*>(tabWidget->widget(i));
-            if (ed) disconnect(ed, &CodeEditor::characterTyped, typingSound, &QSoundEffect::play);
-        }
+        for (CodeEditor *ed : allEditors())
+            disconnect(ed, &CodeEditor::characterTyped, typingSound, &QSoundEffect::play);
     }
 }
 
@@ -702,18 +693,24 @@ void TextEditor::showAbout() {
 }
 
 void TextEditor::closeEvent(QCloseEvent *event) {
-  for (int i = 0; i < tabWidget->count(); ++i) {
-    if (tabWidget->widget(i) == welcomeWidget)
-      continue;
-    if (!maybeSave(i)) {
-      event->ignore();
-      return;
+  const QList<QTabWidget *> panes = tabWidget2 ? QList<QTabWidget *>{tabWidget, tabWidget2}
+                                               : QList<QTabWidget *>{tabWidget};
+  for (QTabWidget *tw : panes) {
+    for (int i = 0; i < tw->count(); ++i) {
+      if (tw->widget(i) == welcomeWidget)
+        continue;
+      if (!maybeSave(i, tw)) {
+        event->ignore();
+        return;
+      }
     }
   }
   
   // Save session time
-  QSettings settings("Jim", "JimEditor");
-  int secs = sessionSecondsAccumulated + sessionStart.secsTo(QDateTime::currentDateTime());
+  QSettings settings("TextEditor", "Settings");
+  int secs = sessionSecondsAccumulated;
+  if (sessionStart.isValid())
+    secs += static_cast<int>(sessionStart.secsTo(QDateTime::currentDateTime()));
   settings.setValue("sessionDate", sessionDateString);
   settings.setValue("sessionSeconds", secs);
   
@@ -741,6 +738,8 @@ void TextEditor::writeSettings() {
 
 bool TextEditor::maybeSave(int tabIndex, QTabWidget *targetWidget) {
   QTabWidget *tw = targetWidget ? targetWidget : tabWidget;
+  if (!tw || tabIndex < 0 || tabIndex >= tw->count())
+    return true;
   QWidget *widget = tw->widget(tabIndex);
   CodeEditor *editor = qobject_cast<CodeEditor *>(widget);
   HexEditor *hexEditor = qobject_cast<HexEditor *>(widget);
@@ -754,14 +753,24 @@ bool TextEditor::maybeSave(int tabIndex, QTabWidget *targetWidget) {
   if (!modified)
     return true;
 
-  tabWidget->setCurrentIndex(tabIndex);
+  activeTabWidget = tw;
+  tw->setCurrentIndex(tabIndex);
+  widget->setFocus();
   const QMessageBox::StandardButton ret = QMessageBox::warning(
       this, "Jim",
       "The document has been modified.\nDo you want to save your changes?",
       QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
   switch (ret) {
   case QMessageBox::Save:
-    return saveFile();
+    if (editor && editor->getFileName().isEmpty())
+      return saveFileAs();
+    if (editor)
+      return saveFileToPath(editor->getFileName(), editor);
+    if (hexEditor && hexEditor->property("fileName").toString().isEmpty())
+      return saveFileAs();
+    if (hexEditor)
+      return saveFileToPath(hexEditor->property("fileName").toString(), hexEditor);
+    return false;
   case QMessageBox::Cancel:
     return false;
   default:
@@ -771,11 +780,21 @@ bool TextEditor::maybeSave(int tabIndex, QTabWidget *targetWidget) {
 }
 
 void TextEditor::loadFile(const QString &fileName) {
-  QFile file(fileName);
+  const QString path = normalizedPath(fileName);
+  QTabWidget *existingPane = nullptr;
+  QWidget *existing = findOpenDocument(path, &existingPane);
+  if (existing) {
+    activeTabWidget = existingPane;
+    existingPane->setCurrentIndex(existingPane->indexOf(existing));
+    existing->setFocus();
+    return;
+  }
+
+  QFile file(path);
   if (!file.open(QFile::ReadOnly)) {
     QMessageBox::warning(this, "Jim",
                          QString("Cannot read file %1:\n%2.")
-                             .arg(fileName)
+                             .arg(path)
                              .arg(file.errorString()));
     return;
   }
@@ -784,18 +803,21 @@ void TextEditor::loadFile(const QString &fileName) {
   QByteArray fileData = file.readAll();
   file.close();
 
-  bool isBinary = false;
-  int nullCount = 0;
-  int sampleSize = qMin(512, fileData.size());
-  for (int i = 0; i < sampleSize; ++i) {
-    if (fileData[i] == 0) {
-      nullCount++;
-      if (nullCount > 1) {
-        isBinary = true;
-        break;
-      }
-    }
-  }
+  QStringConverter::Encoding encoding = QStringDecoder::Utf8;
+  if (fileData.startsWith(QByteArray::fromHex("FFFE0000")))
+    encoding = QStringDecoder::Utf32LE;
+  else if (fileData.startsWith(QByteArray::fromHex("0000FEFF")))
+    encoding = QStringDecoder::Utf32BE;
+  else if (fileData.startsWith(QByteArray::fromHex("FFFE")))
+    encoding = QStringDecoder::Utf16LE;
+  else if (fileData.startsWith(QByteArray::fromHex("FEFF")))
+    encoding = QStringDecoder::Utf16BE;
+
+  QStringDecoder decoder(encoding);
+  QString decodedText = decoder(fileData);
+  bool isBinary = decoder.hasError();
+  if (!decodedText.isEmpty() && decodedText.front() == QChar::ByteOrderMark)
+    decodedText.remove(0, 1);
 
   hideWelcomeScreen();
   QApplication::setOverrideCursor(Qt::WaitCursor);
@@ -806,22 +828,22 @@ void TextEditor::loadFile(const QString &fileName) {
     // Open in hex editor
     HexEditor *hexEditor = new HexEditor();
     hexEditor->setData(fileData);
-    hexEditor->setProperty("fileName", fileName);
+    hexEditor->setProperty("fileName", path);
 
     connect(hexEditor, &HexEditor::modificationChanged, this,
             &TextEditor::documentWasModified);
 
-    int index = tabWidget->addTab(hexEditor, "[HEX] " + strippedName(fileName));
-    tabWidget->setCurrentIndex(index);
+    int index = currentTabWidget()->addTab(hexEditor, "[HEX] " + strippedName(path));
+    currentTabWidget()->setCurrentIndex(index);
   } else {
     // Open in text editor
     CodeEditor *editor = new CodeEditor();
-    editor->setPlainText(QString::fromUtf8(fileData));
-    editor->setFileName(fileName);
+    editor->setPlainText(decodedText);
+    editor->setFileName(path);
     editor->document()->setModified(false);
 
     // Auto-detect language
-    lang = detectLanguage(fileName);
+    lang = detectLanguage(path);
     editor->setLanguage(lang);
 
     SyntaxHighlighter *highlighter = new SyntaxHighlighter(editor->document());
@@ -880,14 +902,14 @@ void TextEditor::loadFile(const QString &fileName) {
     // Apply ambient tint immediately so the new editor matches others
     updateAmbientTheme();
 
-    int index = tabWidget->addTab(editor, strippedName(fileName));
-    tabWidget->setCurrentIndex(index);
+    int index = currentTabWidget()->addTab(editor, strippedName(path));
+    currentTabWidget()->setCurrentIndex(index);
 
-    watchFile(fileName);
+    watchFile(path);
   }
 
   QApplication::restoreOverrideCursor();
-  updateRecentFiles(fileName);
+  updateRecentFiles(path);
 
   // Update language label
   if (isBinary) {
@@ -904,36 +926,39 @@ void TextEditor::loadFile(const QString &fileName) {
   QTimer::singleShot(0, this, &TextEditor::clampToScreen);
 }
 
-bool TextEditor::saveFileToPath(const QString &fileName) {
-  QGuiApplication::setOverrideCursor(Qt::WaitCursor);
-  
-  // Temporarily unwatch to prevent false "modified externally" alert
-  unwatchFile(fileName);
-  
-  QSaveFile file(fileName);
-  if (file.open(QFile::WriteOnly)) {
-    CodeEditor *editor = currentEditor();
-    HexEditor *hexEditor =
-        qobject_cast<HexEditor *>(tabWidget->currentWidget());
-    if (editor) {
-      // Trim trailing whitespace
-      QString text = editor->toPlainText();
-      QStringList lines = text.split('\n');
-      for (int i = 0; i < lines.size(); ++i) {
-        while (lines[i].endsWith(' ') || lines[i].endsWith('\t')) {
-          lines[i].chop(1);
-        }
-      }
-      text = lines.join('\n');
+bool TextEditor::saveFileToPath(const QString &fileName, QWidget *document) {
+  const QString path = normalizedPath(fileName);
+  QWidget *target = document;
+  if (!target) {
+    QTabWidget *tw = currentTabWidget();
+    target = tw ? tw->currentWidget() : nullptr;
+  }
+  if (!target || path.isEmpty())
+    return false;
 
+  QGuiApplication::setOverrideCursor(Qt::WaitCursor);
+
+  // Temporarily unwatch to prevent false "modified externally" alert
+  QString oldPath;
+  if (auto *editor = qobject_cast<CodeEditor *>(target))
+    oldPath = editor->getFileName();
+  else if (auto *hexEditor = qobject_cast<HexEditor *>(target))
+    oldPath = hexEditor->property("fileName").toString();
+  unwatchFile(oldPath.isEmpty() ? path : oldPath);
+
+  QSaveFile file(path);
+  if (file.open(QFile::WriteOnly)) {
+    CodeEditor *editor = qobject_cast<CodeEditor *>(target);
+    HexEditor *hexEditor = qobject_cast<HexEditor *>(target);
+    if (editor) {
       QTextStream out(&file);
-      out << text;
+      out << editor->toPlainText();
       if (!file.commit()) {
         QGuiApplication::restoreOverrideCursor();
-        watchFile(fileName); // Re-watch on failure
+        watchFile(oldPath.isEmpty() ? path : oldPath); // Re-watch on failure
         QMessageBox::warning(this, "Jim",
                              QString("Cannot write file %1:\n%2.")
-                                 .arg(fileName)
+                                 .arg(path)
                                  .arg(file.errorString()));
         return false;
       }
@@ -941,38 +966,43 @@ bool TextEditor::saveFileToPath(const QString &fileName) {
       file.write(hexEditor->data());
       if (!file.commit()) {
         QGuiApplication::restoreOverrideCursor();
-        watchFile(fileName); // Re-watch on failure
+        watchFile(oldPath.isEmpty() ? path : oldPath); // Re-watch on failure
         QMessageBox::warning(this, "Jim",
                              QString("Cannot write file %1:\n%2.")
-                                 .arg(fileName)
+                                 .arg(path)
                                  .arg(file.errorString()));
         return false;
       }
       hexEditor->setModified(false);
-      hexEditor->setProperty("fileName", fileName);
+      hexEditor->setProperty("fileName", path);
     }
   } else {
     QGuiApplication::restoreOverrideCursor();
-    watchFile(fileName); // Re-watch on failure
+    watchFile(oldPath.isEmpty() ? path : oldPath); // Re-watch on failure
     QMessageBox::warning(this, "Jim",
                          QString("Cannot write file %1:\n%2.")
-                             .arg(fileName)
+                             .arg(path)
                              .arg(file.errorString()));
     return false;
   }
   QApplication::restoreOverrideCursor();
-  
+
   // Re-watch after successful save
-  watchFile(fileName);
-  
-  setCurrentFile(fileName);
-  updateRecentFiles(fileName);
+  watchFile(path);
+
+  setCurrentFile(path, target);
+  updateRecentFiles(path);
   statusBar()->showMessage("File saved", 2000);
   return true;
 }
 
-void TextEditor::setCurrentFile(const QString &fileName) {
-  CodeEditor *editor = currentEditor();
+void TextEditor::setCurrentFile(const QString &fileName, QWidget *document) {
+  QWidget *target = document;
+  if (!target) {
+    QTabWidget *tw = currentTabWidget();
+    target = tw ? tw->currentWidget() : nullptr;
+  }
+  CodeEditor *editor = qobject_cast<CodeEditor *>(target);
   if (!editor)
     return;
   unwatchFile(editor->getFileName());
@@ -986,7 +1016,12 @@ void TextEditor::setCurrentFile(const QString &fileName) {
     hl->setLanguage(lang);
   }
   QString shownName = strippedName(fileName);
-  tabWidget->setTabText(tabWidget->currentIndex(), shownName);
+  for (QWidget *parent = editor->parentWidget(); parent; parent = parent->parentWidget()) {
+    if (auto *tw = qobject_cast<QTabWidget *>(parent)) {
+      tw->setTabText(tw->indexOf(editor), shownName);
+      break;
+    }
+  }
   setWindowTitle(shownName + " - Jim");
   watchFile(fileName);
 }
@@ -1020,8 +1055,55 @@ void TextEditor::updateRecentFilesMenu() {
   }
 }
 
+QTabWidget *TextEditor::currentTabWidget() const {
+  if (activeTabWidget == tabWidget2 && tabWidget2)
+    return tabWidget2;
+  return tabWidget;
+}
+
+QList<CodeEditor *> TextEditor::allEditors() const {
+  QList<CodeEditor *> editors;
+  const QList<QTabWidget *> panes = tabWidget2 ? QList<QTabWidget *>{tabWidget, tabWidget2}
+                                               : QList<QTabWidget *>{tabWidget};
+  for (QTabWidget *tw : panes) {
+    for (int i = 0; i < tw->count(); ++i) {
+      if (auto *editor = qobject_cast<CodeEditor *>(tw->widget(i)))
+        editors.append(editor);
+    }
+  }
+  return editors;
+}
+
+QString TextEditor::normalizedPath(const QString &path) const {
+  QFileInfo info(path);
+  const QString canonical = info.canonicalFilePath();
+  return QDir::cleanPath(canonical.isEmpty() ? info.absoluteFilePath() : canonical);
+}
+
+QWidget *TextEditor::findOpenDocument(const QString &path, QTabWidget **pane) const {
+  const QList<QTabWidget *> panes = tabWidget2 ? QList<QTabWidget *>{tabWidget, tabWidget2}
+                                               : QList<QTabWidget *>{tabWidget};
+  for (QTabWidget *tw : panes) {
+    for (int i = 0; i < tw->count(); ++i) {
+      QWidget *document = tw->widget(i);
+      QString documentPath;
+      if (auto *editor = qobject_cast<CodeEditor *>(document))
+        documentPath = editor->getFileName();
+      else if (auto *hexEditor = qobject_cast<HexEditor *>(document))
+        documentPath = hexEditor->property("fileName").toString();
+      if (!documentPath.isEmpty() && normalizedPath(documentPath) == path) {
+        if (pane)
+          *pane = tw;
+        return document;
+      }
+    }
+  }
+  return nullptr;
+}
+
 CodeEditor *TextEditor::currentEditor() {
-  return qobject_cast<CodeEditor *>(tabWidget->currentWidget());
+  QTabWidget *tw = currentTabWidget();
+  return qobject_cast<CodeEditor *>(tw ? tw->currentWidget() : nullptr);
 }
 SyntaxHighlighter *TextEditor::currentHighlighter() {
   CodeEditor *editor = currentEditor();
@@ -1038,14 +1120,7 @@ void TextEditor::toggleSplitView() {
       tabWidget2->setMovable(true);
       
       connect(tabWidget2, &QTabWidget::tabCloseRequested, this, [this](int index) {
-          if (maybeSave(index)) {
-              CodeEditor *editor = qobject_cast<CodeEditor *>(tabWidget2->widget(index));
-              if (editor) {
-                  unwatchFile(editor->getFileName());
-                  highlighters.remove(editor);
-              }
-              tabWidget2->removeTab(index);
-          }
+          closeTab(index, tabWidget2);
       });
       connect(tabWidget2, &QTabWidget::currentChanged, this, &TextEditor::tabChanged);
       
@@ -1053,8 +1128,11 @@ void TextEditor::toggleSplitView() {
     }
     tabWidget2->show();
   } else {
-    if (tabWidget2)
+    if (tabWidget2) {
       tabWidget2->hide();
+      if (activeTabWidget == tabWidget2)
+        activeTabWidget = tabWidget;
+    }
   }
 }
 
@@ -1141,9 +1219,6 @@ void TextEditor::applyThemeToEditor(CodeEditor *editor,
 }
 
 void TextEditor::applyThemeToAllEditors() {
-  for (int i = 0; i < tabWidget->count(); ++i) {
-    CodeEditor *editor = qobject_cast<CodeEditor *>(tabWidget->widget(i));
-    if (editor)
-      applyThemeToEditor(editor, highlighters.value(editor));
-  }
+  for (CodeEditor *editor : allEditors())
+    applyThemeToEditor(editor, highlighters.value(editor));
 }

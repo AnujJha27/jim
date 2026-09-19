@@ -88,7 +88,7 @@ private slots:
     bool saveFile();
     bool saveFileAs();
     bool maybeSave(int tabIndex, QTabWidget *targetWidget = nullptr);
-    void closeTab(int index);
+    void closeTab(int index, QTabWidget *targetWidget = nullptr);
     void tabChanged(int index);
     void findText();
     void findNext();
@@ -116,7 +116,7 @@ private slots:
     void showAbout();
     void onFileTreeDoubleClicked(const QModelIndex &index);
     void onFileTreeContextMenu(const QPoint &pos);
-    void toggleMarkdownPreview();
+    void setMarkdownPreviewVisible(bool visible);
     void updateMarkdownPreview();
     void onFileChangedExternally(const QString &path);
     void updateBreadcrumb();
@@ -202,12 +202,16 @@ private:
     void readSettings();
     void writeSettings();
     void loadFile(const QString &fileName);
-    bool saveFileToPath(const QString &fileName);
-    void setCurrentFile(const QString &fileName);
+    bool saveFileToPath(const QString &fileName, QWidget *document = nullptr);
+    void setCurrentFile(const QString &fileName, QWidget *document = nullptr);
     QString strippedName(const QString &fullFileName);
     void updateRecentFiles(const QString &fileName);
     void updateRecentFilesMenu();
+    QTabWidget *currentTabWidget() const;
+    QList<CodeEditor *> allEditors() const;
     CodeEditor* currentEditor();
+    QString normalizedPath(const QString &path) const;
+    QWidget *findOpenDocument(const QString &path, QTabWidget **pane = nullptr) const;
     SyntaxHighlighter* currentHighlighter();
     void initializeThemes();
     void applyThemeToEditor(CodeEditor *editor, SyntaxHighlighter *highlighter);
@@ -229,7 +233,7 @@ private:
     // Animated panel helpers
     void animateTerminalShow();
     void animateTerminalHide();
-    void flashTabLabel(int tabIndex);
+    void flashTabLabel(int tabIndex, QTabWidget *targetWidget = nullptr);
     void flashStatusMessage(const QString &msg, const QColor &color = QColor("#4ec9b0"), int ms = 2500);
 
     // Markdown preview helpers
@@ -243,6 +247,7 @@ private:
     QSplitter *verticalSplitter = nullptr;
     QTabWidget *tabWidget = nullptr;
     QTabWidget *tabWidget2 = nullptr;
+    QTabWidget *activeTabWidget = nullptr;
     WelcomeWidget *welcomeWidget = nullptr;
     BreadcrumbBar *breadcrumbBar = nullptr;
     FindBar *findBar = nullptr;

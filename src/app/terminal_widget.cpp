@@ -62,16 +62,53 @@ void TerminalWidget::setupUI() {
 
     currentDir = QDir::homePath();
     setStyleSheet("background-color: #1e1e1e;");
+    startShell();
 }
 
 void TerminalWidget::setWorkingDirectory(const QString &dir) {
     QDir d(dir);
     if (d.exists()) {
         currentDir = d.absolutePath();
+        if (process && process->state() == QProcess::Running) {
+#ifdef Q_OS_WIN
+            process->write(QString("cd /d \"%1\"\r\n").arg(currentDir).toLocal8Bit());
+#else
+            QString quoted = currentDir;
+            quoted.replace("'", "'\\''");
+            process->write(QString("cd -- '%1'\n").arg(quoted).toLocal8Bit());
+#endif
+        }
     }
 }
 
-void TerminalWidget::startShell() {}
+void TerminalWidget::startShell() {
+    if (process && process->state() != QProcess::NotRunning)
+        return;
+
+    process = new QProcess(this);
+    process->setWorkingDirectory(currentDir);
+    process->setProcessChannelMode(QProcess::MergedChannels);
+    connect(process, &QProcess::readyRead, this, [this]() {
+        output->appendPlainText(QString::fromLocal8Bit(process->readAll()));
+    });
+    connect(process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError) {
+        if (process)
+            appendOutput(process->errorString());
+    });
+    QProcess *shell = process;
+    connect(shell, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            this, [this, shell]() {
+                if (process == shell)
+                    process = nullptr;
+                shell->deleteLater();
+            });
+
+#ifdef Q_OS_WIN
+    process->start("cmd.exe");
+#else
+    process->start("/bin/sh");
+#endif
+}
 
 void TerminalWidget::executeCommand() {
     QString cmd = input->text().trimmed();
@@ -87,23 +124,13 @@ void TerminalWidget::executeCommand() {
         return;
     }
 
-    QProcess *proc = new QProcess(this);
-    proc->setWorkingDirectory(currentDir);
-    proc->setProcessChannelMode(QProcess::MergedChannels);
-
-    connect(proc, &QProcess::readyReadStandardOutput, this, [this, proc]() {
-        output->appendPlainText(
-            QString::fromLocal8Bit(proc->readAllStandardOutput()));
-    });
-
-    connect(proc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-            this, [proc]() { proc->deleteLater(); });
-
-#ifdef Q_OS_WIN
-    proc->start("cmd.exe", QStringList() << "/c" << cmd);
-#else
-    proc->start("/bin/sh", QStringList() << "-c" << cmd);
-#endif
+    startShell();
+    if (!process || (!process->waitForStarted(1000) && process->state() != QProcess::Running)) {
+        output->appendPlainText("Could not start shell");
+        return;
+    }
+    process->write(cmd.toLocal8Bit());
+    process->write("\n");
 }
 
 void TerminalWidget::appendOutput(const QString &text) {

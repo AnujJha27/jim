@@ -104,14 +104,13 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-Write-Host "Build successful! Executable should be in the release/ directory." -ForegroundColor Green
+Write-Host "Build successful! Executable should be in the .build/bin/ directory." -ForegroundColor Green
 
 # Ask to deploy (commented out for automated testing, uncomment if desired)
 # $ans = Read-Host "Do you want to run windeployqt to make this portable? (y/n)"
 # if ($ans -eq 'y') {
 Write-Host "Deploying Qt dependencies..." -ForegroundColor Cyan
-$exePath = "release\jim.exe"
-if (-not (Test-Path $exePath)) { $exePath = "debug\jim.exe" } # fallback
+$exePath = ".build\bin\jim.exe"
 
 if (Test-Path $exePath) {
     & windeployqt --no-translations --no-opengl-sw $exePath

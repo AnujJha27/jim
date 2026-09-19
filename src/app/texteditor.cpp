@@ -59,6 +59,12 @@ TextEditor::TextEditor(QWidget *parent)
                  Qt::WindowCloseButtonHint);
 
   setupUI();
+  activeTabWidget = tabWidget;
+  networkManager = new QNetworkAccessManager(this);
+  sessionStart = QDateTime::currentDateTime();
+  sessionDateString = sessionStart.date().toString(Qt::ISODate);
+  sessionTimer = new QTimer(this);
+  sessionTimer->start(1000);
   initializeThemes();
   createActions();
   createMenus();
@@ -122,24 +128,13 @@ void TextEditor::setupUI() {
   tabWidget2 = nullptr;
 
   connect(tabWidget, &QTabWidget::tabCloseRequested, this,
-          &TextEditor::closeTab);
+          [this](int index) { closeTab(index, tabWidget); });
   connect(tabWidget, &QTabWidget::currentChanged, this,
           &TextEditor::tabChanged);
   
   aiAutocomplete = new AIAutocomplete(this);
   connect(aiAutocomplete, &AIAutocomplete::suggestionReady, this, &TextEditor::onAISuggestion);
   
-  connect(tabWidget, &QTabWidget::currentChanged, this, [this](int index) {
-      if (index >= 0) {
-          CodeEditor *ed = qobject_cast<CodeEditor*>(tabWidget->widget(index));
-          if (ed) {
-              connect(ed, &QPlainTextEdit::textChanged, this, [this, ed]() {
-                  aiAutocomplete->trigger(ed);
-              }, Qt::UniqueConnection);
-          }
-      }
-  });
-
   editorLayout->addWidget(mainSplitter);
   verticalSplitter->addWidget(editorContainer);
 
@@ -358,9 +353,13 @@ void TextEditor::unwatchFile(const QString &filePath) {
 
 void TextEditor::onFileChangedExternally(const QString &path) {
   // Find the editor with this file
-  for (int i = 0; i < tabWidget->count(); ++i) {
-    CodeEditor *editor = qobject_cast<CodeEditor *>(tabWidget->widget(i));
-    if (editor && editor->getFileName() == path) {
+  const QList<QTabWidget *> panes = tabWidget2 ? QList<QTabWidget *>{tabWidget, tabWidget2}
+                                               : QList<QTabWidget *>{tabWidget};
+  for (QTabWidget *tw : panes) {
+    for (int i = 0; i < tw->count(); ++i) {
+      CodeEditor *editor = qobject_cast<CodeEditor *>(tw->widget(i));
+      if (!editor || normalizedPath(editor->getFileName()) != normalizedPath(path))
+        continue;
       QMessageBox::StandardButton reply = QMessageBox::question(
           this, "File Changed",
           QString("The file '%1' has been modified externally.\nDo you want to "
@@ -381,7 +380,7 @@ void TextEditor::onFileChangedExternally(const QString &path) {
       }
       // Re-watch (Qt removes paths after change signal)
       watchFile(path);
-      break;
+      return;
     }
   }
 }

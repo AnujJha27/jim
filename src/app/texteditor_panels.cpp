@@ -3,21 +3,8 @@
 void TextEditor::openFolder() {
   QString folder =
       QFileDialog::getExistingDirectory(this, "Open Folder", QDir::homePath());
-  if (!folder.isEmpty()) {
-    currentFolder = folder;
-    fileSystemModel->setRootPath(folder);
-    fileTree->setRootIndex(fileSystemModel->index(folder));
-
-    // Show file tree, hide empty state wrapper
-    if (fileTreeContainer)
-      fileTreeContainer->setCurrentIndex(1);
-
-    // Update terminal working directory
-    if (terminalWidget)
-      terminalWidget->setWorkingDirectory(folder);
-
-    statusBar()->showMessage("Opened folder: " + folder, 2000);
-  }
+  if (!folder.isEmpty())
+    openFolderPath(folder);
 }
 
 void TextEditor::toggleFileTree() {
@@ -31,13 +18,6 @@ void TextEditor::onFileTreeDoubleClicked(const QModelIndex &index) {
   QString filePath = fileSystemModel->filePath(index);
   QFileInfo fileInfo(filePath);
   if (fileInfo.isFile()) {
-    for (int i = 0; i < tabWidget->count(); ++i) {
-      CodeEditor *editor = qobject_cast<CodeEditor *>(tabWidget->widget(i));
-      if (editor && editor->getFileName() == filePath) {
-        tabWidget->setCurrentIndex(i);
-        return;
-      }
-    }
     loadFile(filePath);
   }
 }
@@ -70,26 +50,30 @@ void TextEditor::openFilePath(const QString &filePath) {
 void TextEditor::openFolderPath(const QString &folderPath) {
   QFileInfo fileInfo(folderPath);
   if (fileInfo.exists() && fileInfo.isDir()) {
-    currentFolder = folderPath;
-    fileTree->setRootIndex(fileSystemModel->index(folderPath));
+    currentFolder = QDir(folderPath).canonicalPath();
+    if (currentFolder.isEmpty())
+      currentFolder = QDir(folderPath).absolutePath();
+    fileSystemModel->setRootPath(currentFolder);
+    fileTree->setRootIndex(fileSystemModel->index(currentFolder));
+    if (fileTreeContainer)
+      fileTreeContainer->setCurrentIndex(1);
     fileTreeDock->show();
-    statusBar()->showMessage("Opened folder: " + folderPath, 2000);
+    if (terminalWidget)
+      terminalWidget->setWorkingDirectory(currentFolder);
+    statusBar()->showMessage("Opened folder: " + currentFolder, 2000);
   }
 }
 
 void TextEditor::toggleMiniMap() {
-  for (int i = 0; i < tabWidget->count(); ++i) {
-    CodeEditor *editor = qobject_cast<CodeEditor *>(tabWidget->widget(i));
-    if (editor) {
-      MiniMap *miniMap = editor->getMiniMap();
-      if (miniMap) {
-        if (miniMapAct->isChecked())
-          miniMap->show();
-        else
-          miniMap->hide();
-        QResizeEvent event(editor->size(), editor->size());
-        QApplication::sendEvent(editor, &event);
-      }
+  for (CodeEditor *editor : allEditors()) {
+    MiniMap *miniMap = editor->getMiniMap();
+    if (miniMap) {
+      if (miniMapAct->isChecked())
+        miniMap->show();
+      else
+        miniMap->hide();
+      QResizeEvent event(editor->size(), editor->size());
+      QApplication::sendEvent(editor, &event);
     }
   }
 }
@@ -98,13 +82,12 @@ void TextEditor::toggleMiniMap() {
 //  Markdown Preview
 // ─────────────────────────────────────────────────────────────────────────────
 
-void TextEditor::toggleMarkdownPreview()
+void TextEditor::setMarkdownPreviewVisible(bool visible)
 {
-    if (markdownPreview && markdownPreview->isVisible()) {
-        // Hide: collapse and remove from splitter
+    if (!visible) {
         disconnectMarkdownPreview();
-        markdownPreview->hide();
-        markdownPreviewAct->setChecked(false);
+        if (markdownPreview)
+            markdownPreview->hide();
         return;
     }
 
@@ -119,6 +102,9 @@ void TextEditor::toggleMarkdownPreview()
     if (!markdownPreview) {
         markdownPreview = new MarkdownPreviewWidget();
         markdownPreview->setMinimumWidth(280);
+        mainSplitter->addWidget(markdownPreview);
+        mainSplitter->setStretchFactor(0, 3);
+        mainSplitter->setStretchFactor(mainSplitter->count() - 1, 2);
     }
 
     // Set up debounce timer
@@ -128,11 +114,6 @@ void TextEditor::toggleMarkdownPreview()
         markdownTimer->setInterval(400);
         connect(markdownTimer, &QTimer::timeout, this, &TextEditor::updateMarkdownPreview);
     }
-
-    // Add to the horizontal splitter alongside the tab widget
-    mainSplitter->addWidget(markdownPreview);
-    mainSplitter->setStretchFactor(0, 3);
-    mainSplitter->setStretchFactor(mainSplitter->count() - 1, 2);
 
     // Animate the preview in with a width animation
     markdownPreview->show();
@@ -149,7 +130,8 @@ void TextEditor::toggleMarkdownPreview()
 
     connectMarkdownPreview(editor);
     updateMarkdownPreview();
-    markdownPreviewAct->setChecked(true);
+    if (!markdownPreviewAct->isChecked())
+        markdownPreviewAct->setChecked(true);
 }
 
 void TextEditor::connectMarkdownPreview(CodeEditor *editor)
@@ -174,7 +156,7 @@ void TextEditor::disconnectMarkdownPreview()
 
 void TextEditor::updateMarkdownPreview()
 {
-    if (!markdownPreview || !markdownPreview->isVisible()) return;
+    if (!markdownPreview || !markdownPreviewAct->isChecked()) return;
 
     CodeEditor *editor = currentEditor();
     if (!editor) {

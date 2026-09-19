@@ -202,7 +202,10 @@ StoryParser::Stats StoryParser::computeStats(const QVector<StoryPassage> &passag
         QString cur = queue.dequeue();
         if (!byName.contains(cur)) continue;
         for (const auto &c : byName[cur]->choices) {
-            if (!reachable.contains(c.target)) { reachable.insert(c.target); queue.enqueue(c.target); }
+            if (byName.contains(c.target) && !reachable.contains(c.target)) {
+                reachable.insert(c.target);
+                queue.enqueue(c.target);
+            }
         }
     }
     s.unreachableCount = passages.size() - reachable.size();

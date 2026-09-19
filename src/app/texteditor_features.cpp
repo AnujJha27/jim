@@ -239,22 +239,35 @@ void TextEditor::changeEvent(QEvent *e) {
     if (e->type() == QEvent::ActivationChange && !isActiveWindow()) {
         // Auto-save on focus lost
         if (editorPrefs.autoSaveFocusEnabled) {
-            for (int i = 0; i < tabWidget->count(); ++i) {
-                CodeEditor *ed = qobject_cast<CodeEditor*>(tabWidget->widget(i));
-                if (ed && ed->isModified() && !ed->getFileName().isEmpty())
-                    saveFileToPath(ed->getFileName());
+            const QList<QTabWidget *> panes = tabWidget2 ? QList<QTabWidget *>{tabWidget, tabWidget2}
+                                                         : QList<QTabWidget *>{tabWidget};
+            for (QTabWidget *tw : panes) {
+                for (int i = 0; i < tw->count(); ++i) {
+                    CodeEditor *ed = qobject_cast<CodeEditor *>(tw->widget(i));
+                    if (ed && ed->isModified() && !ed->getFileName().isEmpty())
+                        saveFileToPath(ed->getFileName(), ed);
+                }
             }
         }
     }
 }
 
 bool TextEditor::eventFilter(QObject *obj, QEvent *event) {
+    if (event->type() == QEvent::FocusIn) {
+        for (QWidget *widget = qobject_cast<QWidget *>(obj); widget; widget = widget->parentWidget()) {
+            if (widget == tabWidget || widget == tabWidget2) {
+                activeTabWidget = qobject_cast<QTabWidget *>(widget);
+                break;
+            }
+        }
+    }
     // Double-Shift detection for Search Everywhere
     if (event->type() == QEvent::KeyPress) {
         QKeyEvent *ke = static_cast<QKeyEvent*>(event);
-        if (ke->key() == Qt::Key_Shift) {
+        if (ke->key() == Qt::Key_Shift && !ke->isAutoRepeat()) {
             qint64 now = QDateTime::currentMSecsSinceEpoch();
-            if (now - searchState.lastShiftPressMs < 400)
+            if (now - searchState.lastShiftPressMs < 400 &&
+                (!searchEverywhere || !searchEverywhere->isVisible()))
                 openSearchEverywhere();
             searchState.lastShiftPressMs = now;
         }
@@ -317,6 +330,8 @@ void TextEditor::locateCurrentFileInTree() {
 }
 
 void TextEditor::openSearchEverywhere() {
+    if (searchEverywhere && searchEverywhere->isVisible())
+        return;
     if (!searchEverywhere) {
         searchEverywhere = new SearchEverywhere(this);
         connect(searchEverywhere, &SearchEverywhere::fileRequested,
@@ -327,10 +342,14 @@ void TextEditor::openSearchEverywhere() {
     allActs << menuBar()->actions();
     // Gather open files
     QStringList openFiles;
-    for (int i = 0; i < tabWidget->count(); ++i) {
-        CodeEditor *ed = qobject_cast<CodeEditor*>(tabWidget->widget(i));
-        if (ed && !ed->getFileName().isEmpty())
-            openFiles << ed->getFileName();
+    const QList<QTabWidget *> panes = tabWidget2 ? QList<QTabWidget *>{tabWidget, tabWidget2}
+                                                 : QList<QTabWidget *>{tabWidget};
+    for (QTabWidget *tw : panes) {
+        for (int i = 0; i < tw->count(); ++i) {
+            CodeEditor *ed = qobject_cast<CodeEditor *>(tw->widget(i));
+            if (ed && !ed->getFileName().isEmpty())
+                openFiles << ed->getFileName();
+        }
     }
     searchEverywhere->populate(allActs, recentFiles, openFiles);
     searchEverywhere->exec();
@@ -338,34 +357,26 @@ void TextEditor::openSearchEverywhere() {
 
 void TextEditor::toggleStickyScroll() {
     editorPrefs.stickyScrollEnabled = stickyScrollAct->isChecked();
-    for (int i = 0; i < tabWidget->count(); ++i) {
-        CodeEditor *ed = qobject_cast<CodeEditor*>(tabWidget->widget(i));
-        if (ed) ed->setStickyScrollEnabled(editorPrefs.stickyScrollEnabled);
-    }
+    for (CodeEditor *ed : allEditors())
+        ed->setStickyScrollEnabled(editorPrefs.stickyScrollEnabled);
 }
 
 void TextEditor::toggleInvisibleChars() {
     editorPrefs.invisibleCharsEnabled = invisibleCharsAct->isChecked();
-    for (int i = 0; i < tabWidget->count(); ++i) {
-        CodeEditor *ed = qobject_cast<CodeEditor*>(tabWidget->widget(i));
-        if (ed) ed->setInvisibleCharsEnabled(editorPrefs.invisibleCharsEnabled);
-    }
+    for (CodeEditor *ed : allEditors())
+        ed->setInvisibleCharsEnabled(editorPrefs.invisibleCharsEnabled);
 }
 
 void TextEditor::toggleGitBlame() {
     editorPrefs.gitBlameEnabled = gitBlameAct->isChecked();
-    for (int i = 0; i < tabWidget->count(); ++i) {
-        CodeEditor *ed = qobject_cast<CodeEditor*>(tabWidget->widget(i));
-        if (ed) ed->setGitBlameEnabled(editorPrefs.gitBlameEnabled);
-    }
+    for (CodeEditor *ed : allEditors())
+        ed->setGitBlameEnabled(editorPrefs.gitBlameEnabled);
 }
 
 void TextEditor::toggleAutoSaveOnFocusLost() {
     editorPrefs.autoSaveFocusEnabled = autoSaveFocusAct->isChecked();
-    for (int i = 0; i < tabWidget->count(); ++i) {
-        CodeEditor *ed = qobject_cast<CodeEditor*>(tabWidget->widget(i));
-        if (ed) ed->setAutoSaveOnFocusLost(editorPrefs.autoSaveFocusEnabled);
-    }
+    for (CodeEditor *ed : allEditors())
+        ed->setAutoSaveOnFocusLost(editorPrefs.autoSaveFocusEnabled);
     if (editorPrefs.autoSaveFocusEnabled)
         flashStatusMessage("Auto-Save on Focus Lost: ON", QColor("#4ec9b0"), 2000);
     else
@@ -398,7 +409,8 @@ void TextEditor::sendSelectionToScratchpad() {
 void TextEditor::applyPaneDimming() {
     // Dim the non-active pane in split view
     if (!editorPrefs.splitViewEnabled || !tabWidget2) return;
-    bool pane1Active = tabWidget->currentWidget() && tabWidget->currentWidget()->hasFocus();
+    QTabWidget *activePane = currentTabWidget();
+    bool pane1Active = activePane == tabWidget;
     // Apply semi-transparent overlay on the inactive pane container
     // We use GraphicsOpacityEffect on the entire inactive QTabWidget
     QTabWidget *active = pane1Active ? tabWidget : tabWidget2;
@@ -665,7 +677,7 @@ void TextEditor::triggerPanicButton() {
     }
 
     recentFiles.clear();
-    QSettings settings;
+    QSettings settings("TextEditor", "Settings");
     settings.remove("recentFiles");
     settings.remove("geometry");
     settings.remove("windowState");
@@ -727,16 +739,8 @@ void TextEditor::toggleGasMinimap() {
     gasMiniMapEnabled = !gasMiniMapEnabled;
     if (gasMiniMapAct) gasMiniMapAct->setChecked(gasMiniMapEnabled);
 
-    for (int i = 0; i < tabWidget->count(); ++i) {
-        if (auto *ed = qobject_cast<CodeEditor*>(tabWidget->widget(i)))
-            ed->setGasMinimapEnabled(gasMiniMapEnabled);
-    }
-    if (tabWidget2) {
-        for (int i = 0; i < tabWidget2->count(); ++i) {
-            if (auto *ed = qobject_cast<CodeEditor*>(tabWidget2->widget(i)))
-                ed->setGasMinimapEnabled(gasMiniMapEnabled);
-        }
-    }
+    for (CodeEditor *ed : allEditors())
+        ed->setGasMinimapEnabled(gasMiniMapEnabled);
     flashStatusMessage(gasMiniMapEnabled ? "\U0001F321 Gas Minimap ON" : "Gas Minimap OFF");
 }
 

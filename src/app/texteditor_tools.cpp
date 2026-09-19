@@ -1,9 +1,10 @@
 #include "texteditor_private.h"
 
-void TextEditor::flashTabLabel(int tabIndex) {
-    if (tabIndex < 0 || tabIndex >= tabWidget->count()) return;
+void TextEditor::flashTabLabel(int tabIndex, QTabWidget *targetWidget) {
+    QTabWidget *tw = targetWidget ? targetWidget : currentTabWidget();
+    if (tabIndex < 0 || tabIndex >= tw->count()) return;
     // Briefly change the tab text colour to accent blue then fade back via timer
-    QTabBar *bar = tabWidget->tabBar();
+    QTabBar *bar = tw->tabBar();
     bar->setTabTextColor(tabIndex, QColor("#569cd6"));
     QTimer::singleShot(600, this, [bar, tabIndex]() {
         bar->setTabTextColor(tabIndex, QColor()); // reset to stylesheet default
@@ -30,11 +31,16 @@ void TextEditor::openInDisassembler(const QString &filePath) {
     if (filePath.isEmpty()) return;
 
     // Check if a disassembler tab for this file is already open
-    for (int i = 0; i < tabWidget->count(); ++i) {
-        DisassemblerWidget *w = qobject_cast<DisassemblerWidget *>(tabWidget->widget(i));
-        if (w && w->getFilePath() == filePath) {
-            tabWidget->setCurrentIndex(i);
-            return;
+    const QList<QTabWidget *> panes = tabWidget2 ? QList<QTabWidget *>{tabWidget, tabWidget2}
+                                                 : QList<QTabWidget *>{tabWidget};
+    for (QTabWidget *tw : panes) {
+        for (int i = 0; i < tw->count(); ++i) {
+            DisassemblerWidget *w = qobject_cast<DisassemblerWidget *>(tw->widget(i));
+            if (w && w->getFilePath() == filePath) {
+                activeTabWidget = tw;
+                tw->setCurrentIndex(i);
+                return;
+            }
         }
     }
 
@@ -45,9 +51,11 @@ void TextEditor::openInDisassembler(const QString &filePath) {
     dw->loadFile(filePath);
 
     QString label = "[ASM] " + strippedName(filePath);
-    int idx = tabWidget->addTab(dw, label);
-    tabWidget->setCurrentIndex(idx);
-    flashTabLabel(idx);
+    QTabWidget *tw = currentTabWidget();
+    int idx = tw->addTab(dw, label);
+    tw->setCurrentIndex(idx);
+    activeTabWidget = tw;
+    flashTabLabel(idx, tw);
 
     QApplication::restoreOverrideCursor();
     flashStatusMessage("Disassembling " + strippedName(filePath) + "…",
@@ -58,12 +66,17 @@ void TextEditor::openInBinaryInspector(const QString &filePath) {
     if (filePath.isEmpty()) return;
 
     // Check if an inspector tab for this file is already open
-    for (int i = 0; i < tabWidget->count(); ++i) {
-        BinaryInspectorWidget *w =
-            qobject_cast<BinaryInspectorWidget *>(tabWidget->widget(i));
-        if (w && w->getFilePath() == filePath) {
-            tabWidget->setCurrentIndex(i);
-            return;
+    const QList<QTabWidget *> panes = tabWidget2 ? QList<QTabWidget *>{tabWidget, tabWidget2}
+                                                 : QList<QTabWidget *>{tabWidget};
+    for (QTabWidget *tw : panes) {
+        for (int i = 0; i < tw->count(); ++i) {
+            BinaryInspectorWidget *w =
+                qobject_cast<BinaryInspectorWidget *>(tw->widget(i));
+            if (w && w->getFilePath() == filePath) {
+                activeTabWidget = tw;
+                tw->setCurrentIndex(i);
+                return;
+            }
         }
     }
 
@@ -74,9 +87,11 @@ void TextEditor::openInBinaryInspector(const QString &filePath) {
     bw->loadFile(filePath);
 
     QString label = "[BIN] " + strippedName(filePath);
-    int idx = tabWidget->addTab(bw, label);
-    tabWidget->setCurrentIndex(idx);
-    flashTabLabel(idx);
+    QTabWidget *tw = currentTabWidget();
+    int idx = tw->addTab(bw, label);
+    tw->setCurrentIndex(idx);
+    activeTabWidget = tw;
+    flashTabLabel(idx, tw);
 
     QApplication::restoreOverrideCursor();
     flashStatusMessage("Inspected " + strippedName(filePath),
@@ -92,7 +107,7 @@ void TextEditor::openDisassembler() {
     if (ed && !ed->getFileName().isEmpty()) {
         path = ed->getFileName();
     } else {
-        HexEditor *hex = qobject_cast<HexEditor *>(tabWidget->currentWidget());
+        HexEditor *hex = qobject_cast<HexEditor *>(currentTabWidget()->currentWidget());
         if (hex)
             path = hex->property("fileName").toString();
     }
@@ -158,10 +173,15 @@ void TextEditor::openGhostReplay() {
 
 void TextEditor::openScratchpad() {
     // If already open, just switch to it
-    for (int i = 0; i < tabWidget->count(); ++i) {
-        if (tabWidget->tabText(i) == "📝 Scratchpad") {
-            tabWidget->setCurrentIndex(i);
-            return;
+    const QList<QTabWidget *> panes = tabWidget2 ? QList<QTabWidget *>{tabWidget, tabWidget2}
+                                                 : QList<QTabWidget *>{tabWidget};
+    for (QTabWidget *tw : panes) {
+        for (int i = 0; i < tw->count(); ++i) {
+            if (tw->tabText(i) == "📝 Scratchpad") {
+                activeTabWidget = tw;
+                tw->setCurrentIndex(i);
+                return;
+            }
         }
     }
 
@@ -197,8 +217,10 @@ void TextEditor::openScratchpad() {
         });
     }
 
-    int idx = tabWidget->addTab(scratchpadEditor, "📝 Scratchpad");
-    tabWidget->setCurrentIndex(idx);
+    QTabWidget *tw = currentTabWidget();
+    int idx = tw->addTab(scratchpadEditor, "📝 Scratchpad");
+    tw->setCurrentIndex(idx);
+    activeTabWidget = tw;
     scratchpadEditor->setFocus();
     QTimer::singleShot(0, this, &TextEditor::clampToScreen);
 }
@@ -207,20 +229,16 @@ void TextEditor::openScratchpad() {
 
 void TextEditor::toggleFocusFade() {
     bool enabled = focusFadeAct->isChecked();
-    for (int i = 0; i < tabWidget->count(); ++i) {
-        CodeEditor *ed = qobject_cast<CodeEditor *>(tabWidget->widget(i));
-        if (ed) ed->setFocusFadeEnabled(enabled);
-    }
+    for (CodeEditor *ed : allEditors())
+        ed->setFocusFadeEnabled(enabled);
     flashStatusMessage(enabled ? "Focus Fade: ON" : "Focus Fade: OFF",
                        QColor("#61afef"), 2000);
 }
 
 void TextEditor::toggleImagePreview() {
     bool enabled = imagePreviewAct->isChecked();
-    for (int i = 0; i < tabWidget->count(); ++i) {
-        CodeEditor *ed = qobject_cast<CodeEditor *>(tabWidget->widget(i));
-        if (ed) ed->setImagePreviewEnabled(enabled);
-    }
+    for (CodeEditor *ed : allEditors())
+        ed->setImagePreviewEnabled(enabled);
     flashStatusMessage(enabled ? "Image Preview: ON (hover over image paths)" : "Image Preview: OFF",
                        QColor("#61afef"), 2000);
 }
@@ -366,17 +384,22 @@ void TextEditor::onTodoJump(const QString &filePath, int line) {
         return;
     }
     // Find the tab with this file and jump to the line
-    for (int i = 0; i < tabWidget->count(); ++i) {
-        CodeEditor *ed = qobject_cast<CodeEditor*>(tabWidget->widget(i));
-        if (ed && ed->getFileName() == filePath) {
-            tabWidget->setCurrentIndex(i);
-            QTextCursor cur = ed->textCursor();
-            cur.movePosition(QTextCursor::Start);
-            cur.movePosition(QTextCursor::NextBlock, QTextCursor::MoveAnchor, line);
-            ed->setTextCursor(cur);
-            ed->centerCursor();
-            ed->setFocus();
-            return;
+    const QList<QTabWidget *> panes = tabWidget2 ? QList<QTabWidget *>{tabWidget, tabWidget2}
+                                                 : QList<QTabWidget *>{tabWidget};
+    for (QTabWidget *tw : panes) {
+        for (int i = 0; i < tw->count(); ++i) {
+            CodeEditor *ed = qobject_cast<CodeEditor *>(tw->widget(i));
+            if (ed && normalizedPath(ed->getFileName()) == normalizedPath(filePath)) {
+                activeTabWidget = tw;
+                tw->setCurrentIndex(i);
+                QTextCursor cur = ed->textCursor();
+                cur.movePosition(QTextCursor::Start);
+                cur.movePosition(QTextCursor::NextBlock, QTextCursor::MoveAnchor, line);
+                ed->setTextCursor(cur);
+                ed->centerCursor();
+                ed->setFocus();
+                return;
+            }
         }
     }
     // File not open — load it
@@ -405,10 +428,8 @@ void TextEditor::toggleParanoiaMode() {
     if (paranoiaLabel) {
         paranoiaLabel->setVisible(editorPrefs.paranoiaMode);
     }
-    for (int i = 0; i < tabWidget->count(); ++i) {
-        CodeEditor *ed = qobject_cast<CodeEditor *>(tabWidget->widget(i));
-        if (ed) ed->setParanoiaMode(editorPrefs.paranoiaMode);
-    }
+    for (CodeEditor *ed : allEditors())
+        ed->setParanoiaMode(editorPrefs.paranoiaMode);
     if (editorPrefs.paranoiaMode) {
         flashStatusMessage("PARANOIA MODE: ON — session leaves no trace", QColor("#e81123"), 3000);
     } else {
@@ -418,10 +439,8 @@ void TextEditor::toggleParanoiaMode() {
 
 void TextEditor::toggleVulnScan() {
     bool enabled = vulnScanAct->isChecked();
-    for (int i = 0; i < tabWidget->count(); ++i) {
-        CodeEditor *ed = qobject_cast<CodeEditor *>(tabWidget->widget(i));
-        if (ed) ed->setVulnScanEnabled(enabled);
-    }
+    for (CodeEditor *ed : allEditors())
+        ed->setVulnScanEnabled(enabled);
     if (enabled) {
         flashStatusMessage("⚡ Vuln Scanner: ON — laser underlines active", QColor("#ff2828"), 3000);
     } else {
@@ -431,10 +450,8 @@ void TextEditor::toggleVulnScan() {
 
 void TextEditor::toggleCRT() {
     bool enabled = crtAct->isChecked();
-    for (int i = 0; i < tabWidget->count(); ++i) {
-        CodeEditor *ed = qobject_cast<CodeEditor *>(tabWidget->widget(i));
-        if (ed) ed->setCRTEnabled(enabled);
-    }
+    for (CodeEditor *ed : allEditors())
+        ed->setCRTEnabled(enabled);
     flashStatusMessage(enabled ? "CRT Effect: ON" : "CRT Effect: OFF",
                        QColor("#66fcf1"), 2000);
 }
@@ -459,10 +476,8 @@ void TextEditor::toggleKeyHeatmap() {
 
 void TextEditor::toggleVimMode() {
     bool enabled = vimModeAct->isChecked();
-    for (int i = 0; i < tabWidget->count(); ++i) {
-        CodeEditor *ed = qobject_cast<CodeEditor *>(tabWidget->widget(i));
-        if (ed) ed->setVimEnabled(enabled);
-    }
+    for (CodeEditor *ed : allEditors())
+        ed->setVimEnabled(enabled);
     if (vimModeLabel)
         vimModeLabel->setVisible(enabled);
     flashStatusMessage(enabled ? "Vim Mode: ON  (Esc = Normal)" : "Vim Mode: OFF",
@@ -477,10 +492,8 @@ void TextEditor::updateAmbientTheme() {
     else if (hour >= 20 || hour <  5) tint = QColor( 40,  70, 200, 20); // night — cool blue
     // else: daytime — no tint (default theme bg)
 
-    for (int i = 0; i < tabWidget->count(); ++i) {
-        CodeEditor *ed = qobject_cast<CodeEditor *>(tabWidget->widget(i));
-        if (ed) ed->setAmbientBackground(tint);
-    }
+    for (CodeEditor *ed : allEditors())
+        ed->setAmbientBackground(tint);
 }
 
 void TextEditor::openBinaryInspector() {
@@ -489,7 +502,7 @@ void TextEditor::openBinaryInspector() {
     if (ed && !ed->getFileName().isEmpty()) {
         path = ed->getFileName();
     } else {
-        HexEditor *hex = qobject_cast<HexEditor *>(tabWidget->currentWidget());
+        HexEditor *hex = qobject_cast<HexEditor *>(currentTabWidget()->currentWidget());
         if (hex)
             path = hex->property("fileName").toString();
     }
@@ -546,9 +559,11 @@ void TextEditor::onFileTreeContextMenu(const QPoint &pos) {
             connect(hex, &HexEditor::modificationChanged,
                     this, &TextEditor::documentWasModified);
             hideWelcomeScreen();
-            int tabIdx = tabWidget->addTab(hex, "[HEX] " + fi.fileName());
-            tabWidget->setCurrentIndex(tabIdx);
-            flashTabLabel(tabIdx);
+            QTabWidget *tw = currentTabWidget();
+            int tabIdx = tw->addTab(hex, "[HEX] " + fi.fileName());
+            tw->setCurrentIndex(tabIdx);
+            activeTabWidget = tw;
+            flashTabLabel(tabIdx, tw);
         }
     } else if (chosen == disasmAct) {
         openInDisassembler(filePath);
