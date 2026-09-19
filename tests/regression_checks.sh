@@ -21,6 +21,9 @@ if rg -q 'defaultAudioInput' src/audio/audiomonitor.cpp; then
     exit 1
 fi
 grep -q 'pa_simple_new' src/audio/audiomonitor.cpp
+grep -q 'jim-audio-bridge.exe' src/audio/audiomonitor.cpp
+grep -q 'windows_audio_bridge.cpp' build.ps1
+grep -q 'eRender' tools/windows_audio_bridge.cpp
 
 if rg -q 'command_palette|class CommandPalette' jim.pro include/app src/app; then
     echo "dead command-palette implementation remains" >&2

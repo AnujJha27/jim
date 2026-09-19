@@ -16,8 +16,12 @@ static const GUID KSDATAFORMAT_SUBTYPE_PCM_LOCAL        = { 0x00000001, 0x0000, 
 
 #elif defined(Q_OS_LINUX)
 
+#include <QCoreApplication>
+#include <QFileInfo>
+#include <QDir>
 #include <QProcess>
 #include <QProcessEnvironment>
+#include <QStandardPaths>
 #include <QStringList>
 #include <pulse/error.h>
 #include <pulse/simple.h>
@@ -233,6 +237,74 @@ void AudioMonitor::run() {
     CoUninitialize();
 
 #elif defined(Q_OS_LINUX)
+    const QString configuredBridge =
+        QProcessEnvironment::systemEnvironment().value("JIM_AUDIO_BRIDGE").trimmed();
+    QString bridgePath = configuredBridge;
+    if (bridgePath.isEmpty()) {
+        const QString sibling = QFileInfo(QCoreApplication::applicationFilePath())
+                                    .dir().filePath("jim-audio-bridge.exe");
+        if (QFileInfo::exists(sibling))
+            bridgePath = sibling;
+        else
+            bridgePath = QStandardPaths::findExecutable("jim-audio-bridge.exe");
+    }
+
+    if (!bridgePath.isEmpty()) {
+        QProcess bridge;
+        bridge.setProgram(bridgePath);
+        bridge.setProcessChannelMode(QProcess::SeparateChannels);
+        bridge.start();
+        if (bridge.waitForStarted(2000)) {
+            emit captureStatus("DJ Mode: capturing Windows system output");
+            QByteArray pending;
+            while (m_running && bridge.state() != QProcess::NotRunning) {
+                if (!bridge.waitForReadyRead(100))
+                    continue;
+
+                pending += bridge.readAllStandardOutput();
+                const qsizetype frames = pending.size() / (2 * static_cast<qsizetype>(sizeof(qint16)));
+                if (frames <= 0)
+                    continue;
+
+                const auto *samples = reinterpret_cast<const qint16 *>(pending.constData());
+                const qsizetype blockSize = qMax<qsizetype>(1, frames / 64);
+                {
+                    QMutexLocker locker(&m_mutex);
+                    for (int band = 0; band < 64; ++band) {
+                        float sum = 0.0f;
+                        qsizetype count = 0;
+                        for (qsizetype frame = 0; frame < blockSize; ++frame) {
+                            const qsizetype index = band * blockSize + frame;
+                            if (index >= frames)
+                                break;
+                            const float left = samples[index * 2] / 32768.0f;
+                            const float right = samples[index * 2 + 1] / 32768.0f;
+                            sum += (left * left + right * right) * 0.5f;
+                            ++count;
+                        }
+                        const float rms = count ? std::sqrt(sum / count) : 0.0f;
+                        m_levels[band] = qMin(1.0f, m_levels[band] * 0.7f + rms * 1.5f * 0.3f);
+                    }
+                }
+                pending.remove(0, static_cast<int>(frames * 2 * sizeof(qint16)));
+                emit levelsUpdated();
+            }
+
+            const QString error = QString::fromLocal8Bit(bridge.readAllStandardError()).trimmed();
+            if (bridge.state() != QProcess::NotRunning)
+                bridge.kill();
+            bridge.waitForFinished(1000);
+            if (!m_running)
+                return;
+            emit captureStatus(error.isEmpty()
+                                   ? "DJ Mode: Windows audio bridge stopped."
+                                   : "DJ Mode: Windows bridge failed: " + error);
+        } else if (!configuredBridge.isEmpty()) {
+            emit captureStatus("DJ Mode: cannot start Windows audio bridge: " +
+                               bridge.errorString());
+        }
+    }
+
     const QString configuredSource =
         QProcessEnvironment::systemEnvironment().value("JIM_AUDIO_MONITOR").trimmed();
     QString monitorSource = configuredSource;

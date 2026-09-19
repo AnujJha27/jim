@@ -104,6 +104,20 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
+Write-Host "Building Windows audio loopback bridge..." -ForegroundColor Cyan
+$bridgeSource = "tools\windows_audio_bridge.cpp"
+$bridgePath = ".build\bin\jim-audio-bridge.exe"
+if ($Compiler -eq "nmake") {
+    & cl.exe /nologo /EHsc /O2 /std:c++17 $bridgeSource /Fe:$bridgePath ole32.lib uuid.lib
+    Remove-Item "windows_audio_bridge.obj" -ErrorAction SilentlyContinue
+} else {
+    & g++.exe -std=c++17 -O2 $bridgeSource -o $bridgePath -lole32 -luuid
+}
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Windows audio bridge build failed!"
+    exit 1
+}
+
 Write-Host "Build successful! Executable should be in the .build/bin/ directory." -ForegroundColor Green
 
 # Ask to deploy (commented out for automated testing, uncomment if desired)
